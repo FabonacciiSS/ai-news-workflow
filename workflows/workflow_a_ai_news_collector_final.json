@@ -1,0 +1,872 @@
+{
+  "name": "AI News collector final",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "hour": 7
+            }
+          ]
+        }
+      },
+      "id": "eb96bf9a-9d4f-4662-bf63-dcb2ea55fb4e",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        -432,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $json.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $json.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "id": "28e6564d-5483-4013-95bf-ad2cf5ac1169",
+      "name": "Get Feishu Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a291383a-2989-4e4f-bf9a-34a46c06c3d8",
+              "leftValue": "={{ new Date($json.pubDate).toISOString().slice(0,10) }}",
+              "rightValue": "={{ new Date().toISOString().slice(0,10) }}",
+              "operator": {
+                "type": "dateTime",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e658d7f4-e9c2-41b7-bf84-027ed569dfff",
+      "name": "Filter Today",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=你是一位AI行业分析师，请对以下新闻进行智能分析和整理：\n新闻信息：\n\n- 标题：{{ $json.title }}\n- 内容：{{ $json.description }}\n- 来源：{{ $json.source }}\n- 日期：{{ $json.pubDate }}\n- 链接：{{ $json.link }}\n\n请按照以下格式输出分析结果：\n\n\"标题\": \"请根据原文标题优化后的标题\",\n\"日期\": \"{{ $json.pubDate }}\",\n\"内容\": \"请根据原文内容生成200字以内的内容摘要\",\n\"媒体\": \"{{ $json.source }}\",\n\"链接\": \"{{ $json.link }}\",\n\"相关度评分\": \"请根据AI相关性和重要性给出0-100的评分\",\n\"关键词\": \"请根据文章内容提取3-5个关键词\",\n\"分类\": \"请根据文章内容选择合适的分类\"\n\n要求：\n1. 标题要简洁有力，突出核心信息\n2. 内容摘要要准确概括文章要点，控制在200字以内\n3. 相关度评分范围0-100，基于AI相关性和重要性\n4. 关键词要准确反映文章核心概念\n5. 分类要合理，可选：技术研究、产品发布、投融资、应用场景、行业动态",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "id": "50fd57b5-579d-4c28-ab12-4044c7d52d52",
+      "name": "AI Analysis",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1072,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"标题\": \"OpenAI发布GPT-5新版本\",\n  \"日期\": \"2024-01-20T09:00:00.000Z\",\n  \"内容\": \"OpenAI今日宣布推出GPT-5语言模型，在推理能力和多模态理解方面有显著提升，预计将推动AI技术发展。\",\n  \"媒体\": \"新智元\",\n  \"链接\": \"https://example.com/article\",\n  \"相关度评分\": 95,\n  \"关键词\": [\"AI\", \"GPT-5\", \"语言模型\"],\n  \"分类\": [\"产品发布\", \"技术研究\"]\n}"
+      },
+      "id": "bc04a07b-8a54-4aa9-b9f0-01a2b2e6c674",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1232,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "title",
+              "name": "标题",
+              "value": "={{ $json.output['标题'] || $json['标题'] }}",
+              "type": "string"
+            },
+            {
+              "id": "summary",
+              "name": "摘要",
+              "value": "={{ $json.output['内容'] || $json['内容'] }}",
+              "type": "string"
+            },
+            {
+              "id": "url",
+              "name": "链接",
+              "value": "={{ $json.output['链接'] || $json['链接'] }}",
+              "type": "string"
+            },
+            {
+              "id": "source",
+              "name": "来源",
+              "value": "={{ $json.output['媒体'] || $json['媒体'] }}",
+              "type": "string"
+            },
+            {
+              "id": "publish_date",
+              "name": "发布日期",
+              "value": "={{ $json.output['日期'] || $json['日期'] }}",
+              "type": "string"
+            },
+            {
+              "id": "relevance_score",
+              "name": "相关度评分",
+              "value": "={{ $json.output['相关度评分'] || $json['相关度评分'] || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "keywords",
+              "name": "关键词",
+              "value": "={{ $json.output['关键词'] || $json['关键词'] || [] }}",
+              "type": "array"
+            },
+            {
+              "id": "category",
+              "name": "分类",
+              "value": "={{ $json.output['分类'] || $json['分类'] || [] }}",
+              "type": "array"
+            },
+            {
+              "id": "status",
+              "name": "状态",
+              "value": "已处理",
+              "type": "string"
+            },
+            {
+              "id": "created_at",
+              "name": "创建时间",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5b812394-2b9b-4c22-aa09-32c8b82a6eab",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1376,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $('Configuration').first().json.FEISHU_TABLE_APP_TOKEN }}/tables/{{ $('Configuration').first().json.FEISHU_TABLE_ID }}/records",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Feishu Token').first().json.tenant_access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fields\": {\n    \"title\": \"{{ ($json['标题'] || '').replace(/[\\\"\\\\]/g, '') }}\",\n    \"summary\": \"{{ ($json['摘要'] || '').replace(/[\\\"\\\\]/g, '') }}\",\n    \"url\": {\n      \"text\": \"查看原文\",\n      \"link\": \"{{ $json['链接'] || '' }}\"\n    },\n    \"source\": \"{{ ($json['来源'] || '').replace(/[\\\"\\\\]/g, '') }}\",\n    \"publish_date\": {{ \n      (() => {\n        const dateStr = $json['发布日期'];\n        if (!dateStr || dateStr.trim() === '') {\n          return Date.now();\n        }\n        const date = new Date(dateStr);\n        if (isNaN(date.getTime())) {\n          return Date.now();\n        }\n        return date.getTime();\n      })()\n    }},\n    \"relevance_score\": {{ $json['相关度评分'] || 0 }},\n    \"keywords\": \"{{ Array.isArray($json['关键词']) ? $json['关键词'].join(', ') : ($json['关键词'] || '') }}\",\n    \"category\": \"{{ Array.isArray($json['分类']) ? $json['分类'].join(', ') : ($json['分类'] || '') }}\",\n    \"status\": \"{{ $json['状态'] || '已处理' }}\",\n    \"created_at\": {{ Date.now() }}\n  }\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "3c593663-a8d8-4ca1-8a5c-d6c35645caa9",
+      "name": "Write to Feishu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1744,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aea0ba98-3a2d-4075-8e79-011460cf49dd",
+              "name": "FEISHU_APP_ID",
+              "value": "{{ $env.FEISHU_APP_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "ff9df819-a3d2-4bac-8e83-4be317bd3a21",
+              "name": "FEISHU_APP_SECRET",
+              "value": "{{ $env.FEISHU_APP_SECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "9e159a9f-8040-4f4d-899c-25780240739a",
+              "name": "FEISHU_TABLE_APP_TOKEN",
+              "value": "{{ $env.FEISHU_TABLE_APP_TOKEN }}",
+              "type": "string"
+            },
+            {
+              "id": "5a948500-91ce-439b-b450-428a98442566",
+              "name": "FEISHU_TABLE_ID",
+              "value": "{{ $env.FEISHU_TABLE_ID }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b3695d41-4407-41d2-b7d5-b7e89990115f",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -240,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1d01321f-9130-4c75-9fbd-6b71a98dc6fc",
+              "leftValue": "={{ new Date($json.pubDate).getTime() }}",
+              "rightValue": "={{ new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).getTime() }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        720
+      ],
+      "id": "1171416a-ef31-47b5-87d6-da1c1bb42c4e",
+      "name": "Filter Last Two Weeks"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $('Configuration').first().json.FEISHU_TABLE_APP_TOKEN }}/tables/{{ $('Configuration').first().json.FEISHU_TABLE_ID }}/records?page_size=500",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Feishu Token').first().json.tenant_access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "7cc64d83-9d00-4824-94e0-861ff57a1284",
+      "name": "Query Existing Records",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        640
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 数据清理：过滤掉source为空的历史数据\nconst existingRecords = $input.first().json;\n\nif (existingRecords && existingRecords.data && existingRecords.data.items) {\n  const originalCount = existingRecords.data.items.length;\n  existingRecords.data.items = existingRecords.data.items.filter(record => {\n    const fields = record.fields;\n    return fields.source && fields.source.trim() !== '';\n  });\n  \n  console.log(`数据清理：从 ${originalCount} 条记录中过滤出 ${existingRecords.data.items.length} 条有效记录`);\n}\n\n// 添加延迟函数\nconst delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));\n\n// 获取RSS文章数据（从Collect RSS Articles节点）\nconst rssArticles = $('Collect RSS Articles').all();\n\nconsole.log('=== 优化后的去重调试 ===');\nconsole.log('RSS文章数量:', rssArticles.length);\nconsole.log('飞书记录数量:', existingRecords?.data?.items?.length || 0);\n\n// 检查是否有错误\nif (existingRecords && existingRecords.errorMessage) {\n  console.log('检测到错误:', existingRecords.errorMessage);\n  \n  // 如果是频率限制错误，优化延迟时间\n  if (existingRecords.errorMessage.includes('request trigger frequency limit')) {\n    console.log('API频率限制，等待10秒后重试...');\n    await delay(10000);\n    \n    return [];\n  }\n  \n  return [];\n}\n\n// 如果没有现有记录，直接返回所有RSS文章\nif (!existingRecords || !existingRecords.data || !existingRecords.data.items) {\n  console.log('没有找到现有记录，返回所有RSS文章');\n  return rssArticles;\n}\n\n// 创建现有数据的索引（多重去重）\nconst existingUrls = new Set();\nconst existingTitles = new Set();\nconst existingSummaries = new Set();\n\nexistingRecords.data.items.forEach(record => {\n  const fields = record.fields;\n  \n  // URL去重\n  if (fields.url && fields.url.link) {\n    const url = fields.url.link.toLowerCase().trim();\n    if (url) {\n      existingUrls.add(url);\n    }\n  }\n  \n  // 标题去重\n  if (fields.title) {\n    const title = fields.title.toLowerCase().trim();\n    if (title) {\n      existingTitles.add(title);\n    }\n  }\n  \n  // 摘要去重（用于检测内容重复）\n  if (fields.summary) {\n    const summary = fields.summary.toLowerCase().trim();\n    if (summary && summary.length > 20) { // 只处理有意义的摘要\n      existingSummaries.add(summary);\n    }\n  }\n});\n\nconsole.log(`飞书表格中现有URL数量: ${existingUrls.size}`);\nconsole.log(`飞书表格中现有标题数量: ${existingTitles.size}`);\nconsole.log(`飞书表格中现有摘要数量: ${existingSummaries.size}`);\n\n// 修改前（近两周）\n// const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);\n// console.log('两周前的时间:', twoWeeksAgo.toISOString());\n\n// 时间过滤：只处理2天内的文章\nconst twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);\nconsole.log('两天前的时间:', twoDaysAgo.toISOString());\n\n// 简单的相似度计算函数\nfunction calculateSimilarity(str1, str2) {\n  const longer = str1.length > str2.length ? str1 : str2;\n  const shorter = str1.length > str2.length ? str2 : str1;\n  \n  if (longer.length === 0) return 1.0;\n  \n  const editDistance = levenshteinDistance(longer, shorter);\n  return (longer.length - editDistance) / longer.length;\n}\n\n// 计算编辑距离\nfunction levenshteinDistance(str1, str2) {\n  const matrix = [];\n  \n  for (let i = 0; i <= str2.length; i++) {\n    matrix[i] = [i];\n  }\n  \n  for (let j = 0; j <= str1.length; j++) {\n    matrix[0][j] = j;\n  }\n  \n  for (let i = 1; i <= str2.length; i++) {\n    for (let j = 1; j <= str1.length; j++) {\n      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {\n        matrix[i][j] = matrix[i - 1][j - 1];\n      } else {\n        matrix[i][j] = Math.min(\n          matrix[i - 1][j - 1] + 1,\n          matrix[i][j - 1] + 1,\n          matrix[i - 1][j] + 1\n        );\n      }\n    }\n  }\n  \n  return matrix[str2.length][str1.length];\n}\n\n// 过滤掉已存在的文章 + 时间过滤 + 智能去重\nconst newArticles = [];\nlet duplicateCount = 0;\nlet timeFilteredCount = 0;\nlet urlDuplicateCount = 0;\nlet titleDuplicateCount = 0;\nlet contentSimilarCount = 0;\n\nrssArticles.forEach(article => {\n  if (!article || !article.json || !article.json.link) {\n    console.log('跳过无效文章:', article);\n    return;\n  }\n  \n  // 时间过滤\n  try {\n    const articleDate = new Date(article.json.pubDate);\n    if (isNaN(articleDate.getTime())) {\n      console.log('无效日期格式:', article.json.pubDate);\n      return;\n    }\n    \n    if (articleDate < twoDaysAgo) {\n      timeFilteredCount++;\n      console.log('时间过滤掉:', article.json.title, articleDate.toISOString());\n      return;\n    }\n  } catch (error) {\n    console.log('日期解析错误:', error, '原始日期:', article.json.pubDate);\n    return;\n  }\n  \n  // 多重去重检查\n  const articleUrl = article.json.link.toLowerCase().trim();\n  const articleTitle = article.json.title ? article.json.title.toLowerCase().trim() : '';\n  const articleSummary = article.json.description ? article.json.description.toLowerCase().trim() : '';\n  \n  let isDuplicate = false;\n  let duplicateReason = '';\n  \n  // 1. URL去重\n  if (existingUrls.has(articleUrl)) {\n    isDuplicate = true;\n    duplicateReason = 'URL重复';\n    urlDuplicateCount++;\n  }\n  \n  // 2. 标题去重\n  if (!isDuplicate && articleTitle && existingTitles.has(articleTitle)) {\n    isDuplicate = true;\n    duplicateReason = '标题重复';\n    titleDuplicateCount++;\n  }\n  \n  // 3. 摘要相似度去重\n  if (!isDuplicate && articleSummary && articleSummary.length > 20) {\n    for (const existingSummary of existingSummaries) {\n      const similarity = calculateSimilarity(articleSummary, existingSummary);\n      if (similarity > 0.8) { // 80%相似度阈值\n        isDuplicate = true;\n        duplicateReason = `内容相似 (${Math.round(similarity * 100)}%)`;\n        contentSimilarCount++;\n        break;\n      }\n    }\n  }\n  \n  if (!isDuplicate) {\n    newArticles.push(article);\n    console.log(`✅ 新文章: ${article.json.title}`);\n  } else {\n    duplicateCount++;\n    console.log(`❌ 重复文章: ${article.json.title} - 原因: ${duplicateReason}`);\n  }\n});\n\n// 统计信息\nconsole.log(`\\n=== 去重统计 ===`);\nconsole.log(`RSS文章总数: ${rssArticles.length}`);\nconsole.log(`时间过滤掉: ${timeFilteredCount}`);\nconsole.log(`URL重复: ${urlDuplicateCount}`);\nconsole.log(`标题重复: ${titleDuplicateCount}`);\nconsole.log(`内容相似: ${contentSimilarCount}`);\nconsole.log(`总重复数量: ${duplicateCount}`);\nconsole.log(`新文章数量: ${newArticles.length}`);\n\nif (newArticles.length === 0) {\n  console.log('没有新文章需要处理');\n  return [];\n}\n\n// 返回原始格式的文章数据，让AI Analysis节点能正确接收\nreturn newArticles;"
+      },
+      "id": "839e98e3-33d0-402f-9ab9-c248ef564a10",
+      "name": "Deduplication Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取配置和token\nconst config = $('Configuration').item.json;\nconst tokenData = $('Get Feishu Token').item.json;\nconst token = tokenData.tenant_access_token;\n\nif (!token) {\n  throw new Error('无法获取飞书访问令牌');\n}\n\n// 收集所有RSS数据\nconst allArticles = [];\nconst inputs = $input.all();\n\nconsole.log('=== RSS收集调试信息 ===');\nconsole.log('输入节点数量:', inputs.length);\n\n// 根据RSS源URL确定来源的映射\nconst rssSourceMapping = {\n  'https://plink.anyfeeder.com/weixin/AI_era': '新智元',\n  'https://rsshub.app/aibase/news': 'AIBase',\n  'https://plink.anyfeeder.com/weixin/qqtech': '腾讯科技',\n  'https://www.qbitai.com/feed': '量子位',\n  'https://36kr.com/feed': '36氪',\n  'https://www.jiqizhixin.com/rss': '机器之心',\n  'http://www.geekpark.net/rss': '极客公园'\n};\n\n// 处理RSS Feed Read节点的数据\nfor (let i = 0; i < inputs.length; i++) {\n  console.log(`处理RSS节点 ${i}...`);\n  \n  if (inputs[i].json) {\n    let sourceName = '未知来源';\n    \n    // 方法1：从RSS源URL中确定来源\n    const rssSourceUrl = inputs[i].json?.rssSourceUrl || inputs[i].json?.sourceUrl || '';\n    console.log(`RSS节点 ${i} rssSourceUrl: ${rssSourceUrl}`);\n    \n    for (const [urlPattern, source] of Object.entries(rssSourceMapping)) {\n      if (rssSourceUrl.includes(urlPattern) || rssSourceUrl === urlPattern) {\n        sourceName = source;\n        console.log(`通过rssSourceUrl匹配到来源: ${source} (模式: ${urlPattern})`);\n        break;\n      }\n    }\n    \n    // 方法2：从文章链接中确定来源\n    if (sourceName === '未知来源') {\n      const articleUrl = inputs[i].json?.link || inputs[i].json?.url || '';\n      console.log(`RSS节点 ${i} 文章链接: ${articleUrl}`);\n      \n      if (articleUrl.includes('weixin.sogou.com') && articleUrl.includes('AI_era')) sourceName = '新智元';\n      else if (articleUrl.includes('aibase.com')) sourceName = 'AIBase';\n      else if (articleUrl.includes('weixin.sogou.com') && articleUrl.includes('qqtech')) sourceName = '腾讯科技';\n      else if (articleUrl.includes('qbitai.com')) sourceName = '量子位';\n      else if (articleUrl.includes('36kr.com')) sourceName = '36氪';\n      else if (articleUrl.includes('jiqizhixin.com')) sourceName = '机器之心';\n      else if (articleUrl.includes('geekpark.net')) sourceName = '极客公园';\n      \n      if (sourceName !== '未知来源') {\n        console.log(`通过文章链接匹配到来源: ${sourceName}`);\n      }\n    }\n    \n    // 方法3：从feedTitle中确定来源\n    if (sourceName === '未知来源') {\n      const feedTitle = inputs[i].json?.feedTitle || inputs[i].json?.title || '';\n      console.log(`RSS节点 ${i} feedTitle: ${feedTitle}`);\n      \n      if (feedTitle.includes('AI_era') || feedTitle.includes('新智元')) sourceName = '新智元';\n      else if (feedTitle.includes('aibase') || feedTitle.includes('AIBase')) sourceName = 'AIBase';\n      else if (feedTitle.includes('qqtech') || feedTitle.includes('腾讯科技')) sourceName = '腾讯科技';\n      else if (feedTitle.includes('qbitai') || feedTitle.includes('量子位')) sourceName = '量子位';\n      else if (feedTitle.includes('36kr') || feedTitle.includes('36氪')) sourceName = '36氪';\n      else if (feedTitle.includes('jiqizhixin') || feedTitle.includes('机器之心')) sourceName = '机器之心';\n      else if (feedTitle.includes('geekpark') || feedTitle.includes('极客公园')) sourceName = '极客公园';\n      \n      if (sourceName !== '未知来源') {\n        console.log(`通过feedTitle匹配到来源: ${sourceName}`);\n      }\n    }\n    \n    // 方法4：从creator字段中确定来源（作为备用）\n    if (sourceName === '未知来源') {\n      const creator = inputs[i].json?.creator || '';\n      console.log(`RSS节点 ${i} creator: ${creator}`);\n      \n      if (creator.includes('AI base') || creator.includes('AIBase')) sourceName = 'AIBase';\n      else if (creator.includes('明敏')) sourceName = '量子位';\n      \n      if (sourceName !== '未知来源') {\n        console.log(`通过creator匹配到来源: ${sourceName}`);\n      }\n    }\n    \n    // 方法5：根据输入顺序确定来源（最后备用）\n    if (sourceName === '未知来源') {\n      const predefinedSources = ['新智元', 'AIBase', '腾讯科技', '量子位', '量子位', '36氪', '机器之心', '极客公园'];\n      const sourceIndex = i;\n      if (sourceIndex >= 0 && sourceIndex < predefinedSources.length) {\n        sourceName = predefinedSources[sourceIndex];\n        console.log(`通过输入顺序匹配到来源: ${sourceName} (索引: ${sourceIndex})`);\n      }\n    }\n    \n    console.log(`RSS节点 ${i} 最终来源: ${sourceName}`);\n    console.log(`RSS节点 ${i} 完整数据:`, JSON.stringify(inputs[i].json, null, 2));\n    \n    // RSS Feed Read节点会直接返回解析好的数据\n    const article = inputs[i].json;\n    \n    // 处理时间格式\n    let pubDate = article.pubDate || article.published || new Date().toISOString();\n    \n    // 如果是Unix时间戳（数字），转换为ISO字符串\n    if (typeof pubDate === 'number') {\n      pubDate = new Date(pubDate * 1000).toISOString();\n    } else if (typeof pubDate === 'string') {\n      // 尝试解析各种日期格式\n      const date = new Date(pubDate);\n      if (!isNaN(date.getTime())) {\n        pubDate = date.toISOString();\n      } else {\n        pubDate = new Date().toISOString();\n      }\n    }\n    \n    const newArticle = {\n      title: article.title || article.name || '',\n      description: article.description || article.content || article.summary || '',\n      link: article.link || article.url || '',\n      pubDate: pubDate,\n      source: sourceName,\n      guid: article.guid || article.id || '',\n      feedTitle: article.feedTitle || sourceName,\n      creator: article.creator || '',\n      rssSourceUrl: article.rssSourceUrl || ''\n    };\n    \n    console.log(`添加RSS文章:`, newArticle);\n    allArticles.push(newArticle);\n  }\n}\n\n// 去重处理（基于标题和链接）\nconst uniqueArticles = [];\nconst seenTitles = new Set();\nconst seenLinks = new Set();\n\nallArticles.forEach(article => {\n  const titleKey = article.title.toLowerCase().trim();\n  const linkKey = article.link.toLowerCase().trim();\n  \n  if (!seenTitles.has(titleKey) && !seenLinks.has(linkKey)) {\n    seenTitles.add(titleKey);\n    seenLinks.add(linkKey);\n    uniqueArticles.push(article);\n  } else {\n    console.log('跳过重复RSS文章:', article.title);\n  }\n});\n\nconsole.log(`收集到 ${uniqueArticles.length} 篇RSS文章（去重后）`);\n\n// 为每篇文章添加配置信息\nreturn uniqueArticles.map(article => ({\n  ...article,\n  _token: token,\n  _config: config,\n  created_at: new Date().toISOString(),\n  status: '待筛选',\n  article_type: 'rss'\n}));"
+      },
+      "id": "64a4a14f-a23f-47fb-b2e8-01af08008f0d",
+      "name": "Collect RSS Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        624,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 在 Catch Error 节点的 JavaScript 代码中\nconst error = $input.first().json;\n\nconsole.log('Query Existing Records 节点出错:', error);\n\n// 检查是否是频率限制错误\nif (error.errorMessage && error.errorMessage.includes('request trigger frequency limit')) {\n  console.log('检测到API频率限制，等待重试...');\n  \n  // 等待一段时间后重试\n  await new Promise(resolve => setTimeout(resolve, 10000)); // 等待10秒\n  \n  // 可以在这里添加重试逻辑或发送通知\n  return [{\n    json: {\n      error_type: 'rate_limit',\n      message: 'API频率限制，已等待重试',\n      retry_after: 10\n    }\n  }];\n}\n\n// 其他错误处理\nreturn [{\n  json: {\n    error_type: 'other',\n    message: error.errorMessage || '未知错误',\n    original_error: error\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        880
+      ],
+      "id": "13c5df09-f571-423e-9668-280b173a014f",
+      "name": "Catch Error"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $json.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $json.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        288
+      ],
+      "id": "fbf88448-cb7f-4608-bfea-0af4d18a3c15",
+      "name": "Refresh Feishu Token"
+    },
+    {
+      "parameters": {
+        "url": "https://plink.anyfeeder.com/weixin/AI_era",
+        "options": {
+          "ignoreSSL": true
+        }
+      },
+      "id": "e68ff89d-6568-47ff-ae2b-33850d942be3",
+      "name": "RSS Read AI_era",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        -32
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://rsshub.app/aibase/news",
+        "options": {}
+      },
+      "id": "8fe01978-0d32-4e7f-bb32-21c5c5c025b3",
+      "name": "RSS Read aibase",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://plink.anyfeeder.com/weixin/qqtech",
+        "options": {}
+      },
+      "id": "76248684-b79d-4eed-9c6b-e65a1b8f5533",
+      "name": "RSS Read qqtech",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        272
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.qbitai.com/feed",
+        "options": {
+          "ignoreSSL": true
+        }
+      },
+      "id": "2401ccd0-a762-4ee7-af76-13332fa8e619",
+      "name": "RSS Read qbitai(RSSHub)",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        416
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.qbitai.com/feed",
+        "options": {
+          "ignoreSSL": true
+        }
+      },
+      "id": "afd9882e-e4a3-4295-9b51-ae8b40e14e56",
+      "name": "RSS Read qbitai(直连)",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        560
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://36kr.com/feed",
+        "options": {}
+      },
+      "id": "b815b740-62bb-4f8c-9083-cfb77e9e8793",
+      "name": "RSS Read 36kr",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.jiqizhixin.com/rss",
+        "options": {}
+      },
+      "id": "37b58830-cbd4-418e-9d5b-9cf3e8e7cb47",
+      "name": "RSS Read jiqizhixin",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://www.geekpark.net/rss",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        1024
+      ],
+      "id": "f0f5393a-b4b4-43ea-90b1-7faf6a692ab2",
+      "name": "RSS Read geekpark",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-reasoner",
+        "options": {
+          "frequencyPenalty": 0.1,
+          "maxTokens": 3000,
+          "presencePenalty": 0.1,
+          "temperature": 0.1,
+          "topP": 0.8
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        464
+      ],
+      "id": "593d99ed-a2c6-4184-9aed-a60949806f10",
+      "name": "DeepSeek Reasoner Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "{{ $env.DEEPSEEK_API_CREDENTIAL_ID }}",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "time-filter-2days",
+              "leftValue": "={{ new Date($json.pubDate).getTime() }}",
+              "rightValue": "={{ new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).getTime() }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a6c9a8f5-6f7b-4bde-92b9-c0b2dcbe9361",
+      "name": "Filter Recent Articles (1 day)",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        288
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Feishu Token": {
+      "main": [
+        [
+          {
+            "node": "RSS Read AI_era",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read aibase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read qqtech",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read qbitai(直连)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read 36kr",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read jiqizhixin",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read qbitai(RSSHub)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Read geekpark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Write to Feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Analysis",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Get Feishu Token",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Refresh Feishu Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Existing Records": {
+      "main": [
+        [
+          {
+            "node": "Deduplication Filter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Catch Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplication Filter": {
+      "main": [
+        [
+          {
+            "node": "AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect RSS Articles": {
+      "main": [
+        [
+          {
+            "node": "Deduplication Filter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Existing Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refresh Feishu Token": {
+      "main": [
+        [
+          {
+            "node": "Write to Feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read AI_era": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read aibase": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read qqtech": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read qbitai(RSSHub)": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read qbitai(直连)": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read 36kr": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read jiqizhixin": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read geekpark": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles (1 day)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Reasoner Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Analysis",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Recent Articles (1 day)": {
+      "main": [
+        [
+          {
+            "node": "Collect RSS Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "23dd4e70-4781-4aba-98a8-4ce394731c95",
+  "meta": {
+    "instanceId": "d6e264425c95309c6cb7a1b5b39423ac57593612895e6024faca12cbaca2335b"
+  },
+  "id": "tXM93gksmuO30HSG",
+  "tags": []
+}

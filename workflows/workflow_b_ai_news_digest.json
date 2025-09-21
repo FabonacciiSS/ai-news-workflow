@@ -1,0 +1,576 @@
+{
+  "name": "AI News digest",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "hour": 8
+            }
+          ]
+        }
+      },
+      "id": "94034245-a112-4287-a128-7f22b4b86624",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        736,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "feishu_app_id",
+              "name": "FEISHU_APP_ID",
+              "value": "{{ $env.FEISHU_APP_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_app_secret",
+              "name": "FEISHU_APP_SECRET",
+              "value": "{{ $env.FEISHU_APP_SECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_table_app_token",
+              "name": "FEISHU_TABLE_APP_TOKEN",
+              "value": "{{ $env.FEISHU_TABLE_APP_TOKEN }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_table_id",
+              "name": "FEISHU_TABLE_ID",
+              "value": "{{ $env.FEISHU_TABLE_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_webhook_url",
+              "name": "FEISHU_WEBHOOK_URL",
+              "value": "{{ $env.FEISHU_WEBHOOK_URL }}",
+              "type": "string"
+            },
+            {
+              "id": "cb676527-0a29-4ff6-9d88-f6105bf75e55",
+              "name": "ACCESS_TOKEN",
+              "value": "=https://api.weibo.com/oauth2/access_token",
+              "type": "string"
+            },
+            {
+              "id": "b77eedb0-280e-4d5f-b839-1388f3aac28b",
+              "name": "WEIBO_APP_KEY",
+              "value": "{{ $env.WEIBO_APP_KEY }}",
+              "type": "string"
+            },
+            {
+              "id": "8f0dc13c-9181-466d-96be-84471e1372ad",
+              "name": "WEIBO_APP_SECRET",
+              "value": "{{ $env.WEIBO_APP_SECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "caf40040-20a2-4f55-80a1-c27e5d769217",
+              "name": "WEIBO_ACCESS_TOKEN",
+              "value": "{{ $env.WEIBO_ACCESS_TOKEN }}",
+              "type": "string"
+            },
+            {
+              "id": "57643eb3-ade5-4c0d-a560-71dd0724e22d",
+              "name": "WEIBO_UID",
+              "value": "{{ $env.WEIBO_UID }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "90720305-c2c9-43ec-9eb7-e5aa0226f7e3",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        960,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $json.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $json.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "id": "2e68429e-c26a-4102-9f6a-16ed86fbb69f",
+      "name": "Get Feishu Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1184,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $('Configuration').first().json.FEISHU_TABLE_APP_TOKEN }}/tables/{{ $('Configuration').first().json.FEISHU_TABLE_ID }}/records",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Feishu Token').first().json.tenant_access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bc473998-2699-47f8-8519-28d15c684ca0",
+      "name": "Read Feishu Table",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1408,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取表格数据\nconst tableData = $input.first().json;\nconst records = tableData.data?.items || [];\n\nconsole.log(`从飞书表格读取到 ${records.length} 条记录`);\n\n// 计算近两天的日期范围\nconst now = new Date();\nconst twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);\nconst today = new Date(now.getFullYear(), now.getMonth(), now.getDate());\nconst twoDaysAgoStart = new Date(twoDaysAgo.getFullYear(), twoDaysAgo.getMonth(), twoDaysAgo.getDate());\n\nconsole.log(`筛选日期范围: ${twoDaysAgoStart.toISOString()} 到 ${today.toISOString()}`);\n\n// 筛选近两天的记录\nconst recentRecords = records.filter(record => {\n  const fields = record.fields;\n  if (!fields) return false;\n  \n  // 获取发布日期\n  let publishDate;\n  if (fields.publish_date) {\n    // 如果是时间戳（毫秒）\n    if (typeof fields.publish_date === 'number') {\n      publishDate = new Date(fields.publish_date);\n    } else if (typeof fields.publish_date === 'string') {\n      publishDate = new Date(fields.publish_date);\n    }\n  } else if (fields.created_at) {\n    // 使用创建时间作为备选\n    if (typeof fields.created_at === 'number') {\n      publishDate = new Date(fields.created_at);\n    } else if (typeof fields.created_at === 'string') {\n      publishDate = new Date(fields.created_at);\n    }\n  }\n  \n  if (!publishDate || isNaN(publishDate.getTime())) {\n    return false;\n  }\n  \n  // 只保留发布日期在近两天内的记录\n  const recordDate = new Date(publishDate.getFullYear(), publishDate.getMonth(), publishDate.getDate());\n  return recordDate >= twoDaysAgoStart && recordDate <= today;\n});\n\nconsole.log(`筛选出近两天的记录: ${recentRecords.length} 条`);\n\n// 按相关度评分排序，取前10条\nconst sortedRecords = recentRecords\n  .filter(record => {\n    const fields = record.fields;\n    return fields && fields.relevance_score && fields.relevance_score > 0;\n  })\n  .sort((a, b) => (b.fields.relevance_score || 0) - (a.fields.relevance_score || 0))\n  .slice(0, 10);\n\nconsole.log(`按评分排序后取前10条: ${sortedRecords.length} 条`);\n\n// 格式化数据\nconst formattedRecords = sortedRecords.map(record => {\n  const fields = record.fields;\n  return {\n    record_id: record.record_id,\n    title: fields.title || '无标题',\n    summary: fields.summary || fields.description || '无摘要',\n    url: fields.url?.link || fields.link || '',\n    source: fields.source || '未知来源',\n    publish_date: fields.publish_date,\n    relevance_score: fields.relevance_score || 0,\n    keywords: fields.keywords || '',\n    category: fields.category || '',\n    status: fields.status || '已处理'\n  };\n});\n\n// 如果没有找到符合条件的记录，添加测试数据\nif (formattedRecords.length === 0) {\n  console.log('没有找到近两天的记录，添加测试数据');\n  formattedRecords.push(\n    {\n      record_id: 'test-1',\n      title: 'OpenAI发布GPT-5重大更新',\n      summary: 'OpenAI宣布其最新语言模型GPT-5在推理能力和多模态理解方面取得重大突破，预计将推动AI技术发展。',\n      url: 'https://example.com/gpt5-update',\n      source: '新智元',\n      publish_date: Date.now(),\n      relevance_score: 95,\n      keywords: 'AI, GPT-5, 语言模型',\n      category: '产品发布, 技术研究',\n      status: '已处理'\n    },\n    {\n      record_id: 'test-2',\n      title: '谷歌Gemini Ultra性能大幅提升',\n      summary: '谷歌更新其旗舰AI模型Gemini Ultra，新版本在代码生成和数学推理任务上表现出色，性能提升显著。',\n      url: 'https://example.com/gemini-update',\n      source: '量子位',\n      publish_date: Date.now() - 24 * 60 * 60 * 1000,\n      relevance_score: 88,\n      keywords: 'AI, Gemini, 性能提升',\n      category: '技术研究, 产品发布',\n      status: '已处理'\n    }\n  );\n}\n\nconsole.log(`最终处理记录数: ${formattedRecords.length}`);\nconsole.log('记录来源分布:', formattedRecords.reduce((acc, record) => {\n  acc[record.source] = (acc[record.source] || 0) + 1;\n  return acc;\n}, {}));\n\nreturn formattedRecords;"
+      },
+      "id": "d2a12258-eb32-45be-bb69-768a70959390",
+      "name": "Filter Recent Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1632,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=你是一位AI行业分析师，请对以下近两天的AI资讯进行智能分析和精选整理：\n\n资讯列表：\n{{ $json.articles_text }}\n\n请按照以下要求进行分析和整理：\n\n**重要：请一次性分析所有资讯，输出一个完整的汇总分析结果！**\n\n1. **精选原则**：\n   - 优先选择相关度评分≥80的资讯\n   - 重点关注技术突破、产品发布、重大投资等\n   - 避免重复或相似内容\n   - 精选3-5条最有价值的资讯\n\n2. **输出格式**（必须严格按照此JSON格式）：\n{\n  \"精选资讯\": [\n    {\n      \"标题\": \"优化后的标题\",\n      \"来源\": \"媒体名称\",\n      \"摘要\": \"150字以内的核心内容摘要\",\n      \"重要性\": \"高/中/低\",\n      \"关键词\": [\"关键词1\", \"关键词2\"],\n      \"分类\": [\"分类1\", \"分类2\"],\n      \"链接\": \"原文链接\",\n      \"评分\": 85\n    }\n  ],\n  \"今日热点\": \"今日AI行业最重要的热点话题\",\n  \"行业趋势\": \"基于这些资讯分析出的行业发展趋势\",\n  \"推荐理由\": \"为什么选择这些资讯的理由\"\n}\n\n**要求：**\n1. 必须输出完整的JSON格式\n2. 精选资讯数量控制在3-5条\n3. 标题要简洁有力，突出核心信息\n4. 摘要要准确概括文章要点\n5. 关键词和分类要准确反映文章内容\n6. 评分要客观反映文章的重要性和相关性",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "id": "aab19462-fc6e-49f5-9549-18d4c1289fa9",
+      "name": "AI Analysis & Selection",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2080,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"精选资讯\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"标题\": {\"type\": \"string\"},\n          \"来源\": {\"type\": \"string\"},\n          \"摘要\": {\"type\": \"string\"},\n          \"重要性\": {\"type\": \"string\", \"enum\": [\"高\", \"中\", \"低\"]},\n          \"关键词\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n          \"分类\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n          \"链接\": {\"type\": \"string\"},\n          \"评分\": {\"type\": \"number\", \"minimum\": 0, \"maximum\": 100}\n        },\n        \"required\": [\"标题\", \"来源\", \"摘要\", \"重要性\", \"关键词\", \"分类\", \"链接\", \"评分\"]\n      }\n    },\n    \"今日热点\": {\"type\": \"string\"},\n    \"行业趋势\": {\"type\": \"string\"},\n    \"推荐理由\": {\"type\": \"string\"}\n  },\n  \"required\": [\"精选资讯\", \"今日热点\", \"行业趋势\", \"推荐理由\"]\n}"
+      },
+      "id": "5e4c4829-7d10-4154-8797-f6be6084f306",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        2224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取AI分析结果\nconst analysisResult = $input.first().json;\n\nconsole.log('=== Format Feishu Card 调试信息 ===');\nconsole.log('原始分析结果:', JSON.stringify(analysisResult, null, 2));\n\n// 更安全的数据提取 - 支持多种数据格式\nlet selectedNews = [];\nlet todayHotspot = 'AI技术发展';\nlet industryTrend = 'AI技术持续创新';\nlet recommendationReason = '精选优质AI资讯';\n\n// 尝试从不同位置获取数据\nif (analysisResult.output && analysisResult.output['精选资讯']) {\n  selectedNews = analysisResult.output['精选资讯'];\n  todayHotspot = analysisResult.output['今日热点'] || todayHotspot;\n  industryTrend = analysisResult.output['行业趋势'] || industryTrend;\n  recommendationReason = analysisResult.output['推荐理由'] || recommendationReason;\n} else if (analysisResult['精选资讯']) {\n  selectedNews = analysisResult['精选资讯'];\n  todayHotspot = analysisResult['今日热点'] || todayHotspot;\n  industryTrend = analysisResult['行业趋势'] || industryTrend;\n  recommendationReason = analysisResult['推荐理由'] || recommendationReason;\n} else if (Array.isArray(analysisResult)) {\n  // 如果整个结果就是数组\n  selectedNews = analysisResult;\n} else {\n  console.log('无法找到精选资讯数据，使用空数组');\n  selectedNews = [];\n}\n\nconsole.log(`AI精选了 ${selectedNews.length} 条资讯`);\nconsole.log('今日热点:', todayHotspot);\nconsole.log('行业趋势:', industryTrend);\nconsole.log('推荐理由:', recommendationReason);\n\n// 确保 selectedNews 是数组\nif (!Array.isArray(selectedNews)) {\n  console.log('selectedNews 不是数组，转换为数组');\n  selectedNews = [];\n}\n\n// 构建飞书卡片消息\nconst currentDate = new Date().toLocaleDateString('zh-CN', {\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  weekday: 'long'\n});\n\n// 构建卡片内容\nconst cardElements = [\n  {\n    \"tag\": \"div\",\n    \"text\": {\n      \"tag\": \"lark_md\",\n      \"content\": `# 🤖 AI资讯精选 - ${currentDate}\\n\\n**今日热点**: ${todayHotspot}\\n\\n**行业趋势**: ${industryTrend}\\n\\n**推荐理由**: ${recommendationReason}\\n\\n---`\n    }\n  }\n];\n\n// 为每条精选资讯添加卡片元素\nselectedNews.forEach((news, index) => {\n  const importanceEmoji = news.重要性 === '高' ? '🔥' : news.重要性 === '中' ? '⭐' : '📰';\n  const keywordsText = Array.isArray(news.关键词) ? news.关键词.join('、') : news.关键词 || '';\n  const categoryText = Array.isArray(news.分类) ? news.分类.join('、') : news.分类 || '';\n  \n  cardElements.push({\n    \"tag\": \"div\",\n    \"text\": {\n      \"tag\": \"lark_md\",\n      \"content\": `## ${importanceEmoji} ${news.标题}\\n\\n**来源**: ${news.来源} | **评分**: ${news.评分}/100\\n\\n**摘要**: ${news.摘要}\\n\\n**关键词**: ${keywordsText}\\n\\n**分类**: ${categoryText}\\n\\n[查看原文](${news.链接})\\n\\n---`\n    }\n  });\n});\n\n// 添加统计信息\ncardElements.push({\n  \"tag\": \"div\",\n  \"text\": {\n    \"tag\": \"lark_md\",\n    \"content\": `\\n📊 **统计信息**\\n- 精选资讯: ${selectedNews.length} 条\\n- 生成时间: ${new Date().toLocaleString('zh-CN')}\\n- 数据来源: 飞书多维表格`\n  }\n});\n\n// 构建完整的卡片消息\nconst cardMessage = {\n  \"msg_type\": \"interactive\",\n  \"card\": {\n    \"config\": {\n      \"wide_screen_mode\": true\n    },\n    \"elements\": cardElements,\n    \"header\": {\n      \"title\": {\n        \"tag\": \"plain_text\",\n        \"content\": \"🤖 AI资讯精选\"\n      },\n      \"template\": \"blue\"\n    }\n  }\n};\n\nconsole.log('构建的卡片消息:', JSON.stringify(cardMessage, null, 2));\n\nreturn [{\n  json: {\n    message: cardMessage,\n    webhook_url: $('Configuration').first().json.FEISHU_WEBHOOK_URL,\n    selected_count: selectedNews.length,\n    today_hotspot: todayHotspot,\n    industry_trend: industryTrend\n  }\n}];"
+      },
+      "id": "45ebf5d1-6b95-4df9-998b-d0790806ad1b",
+      "name": "Format Feishu Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2432,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.webhook_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.message }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "066a9a1b-d7dc-4692-8fec-09b29a9383bf",
+      "name": "Send to Feishu Group",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.zhihu.com/articles",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"AI资讯精选 - {{ $json.today_hotspot }}\",\n  \"content\": \"{{ $json.zhihu_article }}\",\n  \"summary\": \"每日AI资讯精选，涵盖最新技术动态和行业趋势\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "5a74a5ab-4c10-41ce-b349-6d2a7162815b",
+      "name": "Publish to ZHIHU",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.bilibili.com/x/article/add",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=title=AI资讯精选 - {{ $json.today_hotspot }}&content={{ $json.bilibili_article }}&category=4&tid=4",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "887e1dea-f927-4a5f-bfd4-054393905664",
+      "name": "Publish to Bilibili",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.weibo.com/2/statuses/update.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "={{ $json.weibo_access_token }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.weibo_content }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "99be0e24-30a3-4861-a4d5-3a2131baa085",
+      "name": "Publish to Weibo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        0
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.weibo.com/oauth2/access_token",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "{{ $env.WEIBO_APP_KEY }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "{{ $env.WEIBO_APP_SECRET }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "authorization_code"
+            },
+            {
+              "name": "redirect_uri",
+              "value": "https://api.weibo.com/oauth2/default.html"
+            },
+            {
+              "name": "code",
+              "value": "{{ $env.WEIBO_AUTH_CODE }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1168,
+        144
+      ],
+      "id": "ce038d5f-990e-4a52-8755-838960f43433",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取AI分析结果\nconst analysisResult = $input.first().json;\n\nconsole.log('=== Format to Weibo 调试信息 ===');\nconsole.log('原始分析结果:', JSON.stringify(analysisResult, null, 2));\n\n// 更安全的数据提取 - 支持多种数据格式\nlet selectedNews = [];\nlet todayHotspot = 'AI技术发展';\nlet industryTrend = 'AI技术持续创新';\nlet recommendationReason = '精选优质AI资讯';\n\n// 尝试从不同位置获取数据\nif (analysisResult.output && analysisResult.output['精选资讯']) {\n  selectedNews = analysisResult.output['精选资讯'];\n  todayHotspot = analysisResult.output['今日热点'] || todayHotspot;\n  industryTrend = analysisResult.output['行业趋势'] || industryTrend;\n  recommendationReason = analysisResult.output['推荐理由'] || recommendationReason;\n} else if (analysisResult['精选资讯']) {\n  selectedNews = analysisResult['精选资讯'];\n  todayHotspot = analysisResult['今日热点'] || todayHotspot;\n  industryTrend = analysisResult.output['行业趋势'] || industryTrend;\n  recommendationReason = analysisResult['推荐理由'] || recommendationReason;\n} else if (Array.isArray(analysisResult)) {\n  // 如果整个结果就是数组\n  selectedNews = analysisResult;\n} else {\n  console.log('无法找到精选资讯数据，使用空数组');\n  selectedNews = [];\n}\n\nconsole.log(`AI精选了 ${selectedNews.length} 条资讯`);\nconsole.log('今日热点:', todayHotspot);\nconsole.log('行业趋势:', industryTrend);\nconsole.log('推荐理由:', recommendationReason);\n\n// 确保 selectedNews 是数组\nif (!Array.isArray(selectedNews)) {\n  console.log('selectedNews 不是数组，转换为数组');\n  selectedNews = [];\n}\n\n// 构建微博内容\nconst currentDate = new Date().toLocaleDateString('zh-CN', {\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  weekday: 'long'\n});\n\n// 微博内容生成（1000字限制）\nlet weiboContent = ` 🤖AI资讯精选 - ${currentDate}\\n\\n🔥 今日热点\\n${todayHotspot}\\n\\n📈 行业趋势\\n${industryTrend}\\n\\n🤖 精选资讯\\n\\n`;\n\n// 为每条精选资讯添加内容\nselectedNews.forEach((news, index) => {\n  const importanceEmoji = news.重要性 === '高' ? '🔥' : news.重要性 === '中' ? '⭐' : '📰';\n  const keywordsText = Array.isArray(news.关键词) ? news.关键词.join('、') : news.关键词 || '';\n  const categoryText = Array.isArray(news.分类) ? news.分类.join('、') : news.分类 || '';\n  \n  weiboContent += `${index + 1}. ${importanceEmoji} ${news.标题}\\n来源: ${news.来源} | 评分: ${news.评分}/100\\n${news.摘要}\\n关键词: ${keywordsText}\\n分类: ${categoryText}\\n链接: ${news.链接}\\n\\n`;\n});\n\n// 添加推荐理由和标签\nweiboContent += `🤖 推荐理由\\n${recommendationReason}\\n\\n#AI资讯 #人工智能 #科技前沿 #AI技术`;\n\n// 检查字数限制（1000字）\nif (weiboContent.length > 1000) {\n  console.log(`微博内容长度: ${weiboContent.length} 字，超过1000字限制，进行截断`);\n  \n  // 截断到1000字，保留完整结构\n  weiboContent = weiboContent.substring(0, 997) + '...';\n}\n\nconsole.log(`微博内容长度: ${weiboContent.length} 字`);\nconsole.log('微博内容预览:', weiboContent.substring(0, 200) + '...');\n\n// 返回微博发布所需的数据\nreturn [{\n  json: {\n    weibo_content: weiboContent,\n    weibo_access_token: $('Configuration').first().json.WEIBO_ACCESS_TOKEN,\n    weibo_uid: $('Configuration').first().json.WEIBO_UID,\n    content_length: weiboContent.length,\n    selected_count: selectedNews.length,\n    today_hotspot: todayHotspot,\n    industry_trend: industryTrend\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        0
+      ],
+      "id": "b5b77615-d70e-41eb-836b-6810b06d783d",
+      "name": "Format to Weibo"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-reasoner",
+        "options": {
+          "frequencyPenalty": 0.1,
+          "maxTokens": 4000,
+          "presencePenalty": 0.1,
+          "temperature": 0.7,
+          "maxRetries": 2,
+          "topP": 0.8
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        128
+      ],
+      "id": "39d84ef1-2025-45c9-b6b6-09bfcc5ddeda",
+      "name": "DeepSeek Reasoner Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "{{ $env.DEEPSEEK_API_CREDENTIAL_ID }}",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 新节点：Prepare Data for AI Analysis\nconst articles = $input.all();\n\nconsole.log('=== 准备AI分析数据 ===');\nconsole.log('文章数量:', articles.length);\n\n// 构建AI分析所需的文本格式\nconst articlesText = articles.map((article, index) => {\n  const data = article.json;\n  return `${index + 1}. 标题：${data.title}\n   来源：${data.source}\n   评分：${data.relevance_score}\n   摘要：${data.summary}\n   关键词：${data.keywords}\n   分类：${data.category}\n   链接：${data.url}`;\n}).join('\\n\\n');\n\nconsole.log('构建的文章文本长度:', articlesText.length);\nconsole.log('文章文本预览:', articlesText.substring(0, 500) + '...');\n\n// 返回汇总后的数据\nreturn [{\n  json: {\n    articles_text: articlesText,  // 所有文章的汇总文本\n    articles_count: articles.length,  // 文章数量\n    articles_data: articles.map(a => a.json)  // 原始文章数据数组\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        -96
+      ],
+      "id": "012acc81-c641-4dc5-908f-b33d2b502801",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Get Feishu Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Feishu Token": {
+      "main": [
+        [
+          {
+            "node": "Read Feishu Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Feishu Table": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Recent Articles": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Analysis & Selection": {
+      "main": [
+        [
+          {
+            "node": "Format Feishu Card",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format to Weibo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Feishu Card": {
+      "main": [
+        [
+          {
+            "node": "Send to Feishu Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Analysis & Selection",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Format to Weibo": {
+      "main": [
+        []
+      ]
+    },
+    "DeepSeek Reasoner Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Analysis & Selection",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Analysis & Selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "51c5ee6e-7213-476d-b3a1-1e8cf62cb877",
+  "meta": {
+    "instanceId": "d6e264425c95309c6cb7a1b5b39423ac57593612895e6024faca12cbaca2335b"
+  },
+  "id": "PsIZmaE0SmCFaaOz",
+  "tags": []
+}
