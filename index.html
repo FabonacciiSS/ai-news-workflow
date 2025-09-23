@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI News Workflow</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+        .container { 
+            max-width: 900px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 40px; 
+            border-radius: 15px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header { text-align: center; margin-bottom: 40px; }
+        .feature { 
+            margin: 25px 0; 
+            padding: 20px; 
+            border-left: 5px solid #007acc; 
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        .github-link { 
+            display: inline-block;
+            background: #007acc; 
+            color: white; 
+            padding: 15px 30px; 
+            text-decoration: none; 
+            border-radius: 8px; 
+            font-weight: bold;
+            margin: 20px 0;
+            transition: background 0.3s;
+        }
+        .github-link:hover { background: #005a9e; }
+        .emoji { font-size: 1.2em; }
+        .weibo-share { 
+            text-align: center; 
+            margin: 30px 0; 
+            padding: 20px; 
+            background: #f0f8ff; 
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>�� AI News Workflow</h1>
+            <p style="font-size: 1.2em; color: #666;">基于n8n的AI新闻自动化工作流，实现新闻收集、智能分析和多渠道发布</p>
+        </div>
+        
+        <div class="feature">
+            <h3>✨ 功能特性</h3>
+            <ul>
+                <li><span class="emoji">📰</span> 多源新闻收集：支持多个RSS源的AI相关新闻收集</li>
+                <li><span class="emoji">🧠</span> 智能分析：使用DeepSeek AI进行新闻分析和评分</li>
+                <li><span class="emoji">🔄</span> 自动去重：智能去重算法，避免重复内容</li>
+                <li><span class="emoji">��</span> 数据存储：使用飞书多维表格存储和管理新闻数据</li>
+                <li><span class="emoji">📱</span> 多渠道发布：支持飞书群聊、微博等平台发布</li>
+                <li><span class="emoji">⏰</span> 定时执行：可配置的定时任务，自动化运行</li>
+            </ul>
+        </div>
+        
+        <div class="feature">
+            <h3>�� 快速开始</h3>
+            <ol>
+                <li>克隆项目到本地</li>
+                <li>配置环境变量</li>
+                <li>启动n8n服务</li>
+                <li>导入工作流文件</li>
+            </ol>
+        </div>
+        
+        <div class="feature">
+            <h3>🛠️ 技术栈</h3>
+            <p><strong>n8n</strong> - 工作流自动化平台</p>
+            <p><strong>DeepSeek</strong> - AI分析服务</p>
+            <p><strong>飞书</strong> - 数据存储和通知服务</p>
+            <p><strong>微博</strong> - 内容发布平台</p>
+        </div>
+        
+        <!-- 微博分享组件 -->
+        <div class="weibo-share">
+            <h3>📱 分享到微博</h3>
+            <p>如果这个项目对您有帮助，欢迎分享到微博！</p>
+            <script src="https://tjs.sjs.sinajs.cn/open/api/js/wb.js" type="text/javascript" charset="utf-8"></script>
+            <wb:share-button appkey="2460736970" addition="number" type="button" ralateUid="5523009861" rnd="1348023484"></wb:share-button>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="https://github.com/FabonacciiSS/ai-news-workflow" class="github-link">
+                �� 查看GitHub仓库
+            </a>
+        </div>
+    </div>
+</body>
+</html>
