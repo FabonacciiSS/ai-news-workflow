@@ -1,0 +1,1024 @@
+{
+  "name": "Workflow B - AI News digest v2.1.0 (Feishu + WeChat Draft)",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "hour": 8
+            }
+          ]
+        }
+      },
+      "id": "37a9c26b-12fa-47de-990c-794f9d70ab48",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        -2048,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $json.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $json.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "id": "53f436ee-a34a-4ccb-b051-3958433b3a8a",
+      "name": "Get Feishu Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1600,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $('Configuration').first().json.FEISHU_TABLE_APP_TOKEN }}/tables/{{ $('Configuration').first().json.FEISHU_TABLE_ID }}/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Feishu Token').first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"page_size\": 500,\n  \"sort\": [\n    {\n      \"field_name\": \"publish_date\",\n      \"desc\": true\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "98388abe-0718-43a0-ad0c-b549832bb9fe",
+      "name": "Read Feishu Table",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1376,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取表格数据（已按 publish_date 降序排序）\nconst tableData = $input.first().json;\nconst records = tableData.data?.items || [];\n\nconsole.log(`从飞书表格读取到 ${records.length} 条记录（已按发布日期降序排序）`);\n\nif (records.length === 0) {\n  console.warn('⚠️ 未读取到任何记录，请检查飞书表格配置');\n  return [];\n}\n\n// 安全提取飞书字段的函数（处理 [{text: \"...\", type: \"text\"}] 格式）\nfunction extractFeishuField(field, defaultValue = '') {\n  if (!field) return defaultValue;\n\n  // 如果是字符串，直接返回\n  if (typeof field === 'string') return field;\n\n  // 如果是数组\n  if (Array.isArray(field)) {\n    if (field.length === 0) return defaultValue;\n\n    // 飞书格式：[{text: \"...\", type: \"text\"}]\n    if (field[0] && typeof field[0] === 'object' && field[0].text) {\n      return field.map(item => item.text).join(', ');\n    }\n\n    // 普通数组\n    return field.join(', ');\n  }\n\n  // 如果是对象\n  if (typeof field === 'object') {\n    if (field.text) return field.text;\n    if (field.link) return field.link;\n  }\n\n  return String(field);\n}\n\n// 计算近两天的时间戳（毫秒）\nconst twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;\n// 计算近7天的时间戳（毫秒）\n//const twoDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;\n\nconsole.log(`筛选近两天的数据，截止时间: ${new Date(twoDaysAgo).toLocaleString('zh-CN')}`);\n\n// 筛选近两天的记录\nconst recentRecords = records.filter(record => {\n  const fields = record.fields;\n  if (!fields || !fields.publish_date) return false;\n\n  // 处理时间戳（支持毫秒和秒两种格式）\n  let timestamp = fields.publish_date;\n  if (typeof timestamp === 'string') {\n    timestamp = new Date(timestamp).getTime();\n  } else if (timestamp < 10000000000) {\n    // 如果是秒级时间戳，转换为毫秒\n    timestamp = timestamp * 1000;\n  }\n\n  return timestamp >= twoDaysAgo;\n});\n\nconsole.log(`筛选出近两天的记录: ${recentRecords.length} 条`);\n\n// 按相关度评分过滤和排序，取前10条\nconst sortedRecords = recentRecords\n  .filter(record => {\n    const score = record.fields?.relevance_score || 0;\n    return score > 0;\n  })\n  .sort((a, b) => (b.fields.relevance_score || 0) - (a.fields.relevance_score || 0))\n  .slice(0, 10);\n\nconsole.log(`按评分排序并取前10条: ${sortedRecords.length} 条`);\n\nif (sortedRecords.length === 0) {\n  console.warn('⚠️ 近两天没有符合条件的资讯（评分>0），工作流将停止');\n  return [];\n}\n\n// 格式化数据 - 使用飞书字段提取函数\nconst formattedRecords = sortedRecords.map((record, index) => {\n  const fields = record.fields;\n\n  const title = extractFeishuField(fields.title, '无标题');\n  const summary = extractFeishuField(fields.summary || fields.description, '无摘要');\n  const url = fields.url || '';  // url可能是字符串\n  const source = extractFeishuField(fields.source, '未知来源');\n  const keywords = extractFeishuField(fields.keywords, '');\n  const category = extractFeishuField(fields.category, '');\n\n  // 调试第一条记录\n  if (index === 0) {\n    console.log('\\n=== 第一条记录提取结果 ===');\n    console.log('原始 title 类型:', typeof fields.title);\n    console.log('原始 title:', JSON.stringify(fields.title));\n    console.log('提取后 title:', title);\n    console.log('\\n原始 summary 类型:', typeof fields.summary);\n    console.log('原始 summary:', JSON.stringify(fields.summary).substring(0, 150) + '...');\n    console.log('提取后 summary:', summary.substring(0, 150) + '...');\n    console.log('\\n原始 keywords:', JSON.stringify(fields.keywords));\n    console.log('提取后 keywords:', keywords);\n  }\n\n  return {\n    record_id: record.record_id,\n    title: title,\n    summary: summary,\n    url: url,\n    source: source,\n    publish_date: fields.publish_date,\n    relevance_score: fields.relevance_score || 0,\n    keywords: keywords,\n    category: category,\n    status: fields.status || '已处理'\n  };\n});\n\nconsole.log(`\\n最终处理记录数: ${formattedRecords.length}`);\nconsole.log('记录来源分布:', formattedRecords.reduce((acc, record) => {\n  acc[record.source] = (acc[record.source] || 0) + 1;\n  return acc;\n}, {}));\nconsole.log('平均评分:', (formattedRecords.reduce((sum, r) => sum + r.relevance_score, 0) / formattedRecords.length).toFixed(1));\n\nreturn formattedRecords;\n"
+      },
+      "id": "86b3a710-8a24-4eac-b2c1-5876ab8592c7",
+      "name": "Filter Recent Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -1152,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=你是一位AI行业分析师，请对以下近两天的AI资讯进行智能分析和精选整理。\n\n**重要指示：**\n- 你必须严格基于提供的资讯内容进行分析\n- 不要编造或添加任何不存在的信息\n- 标题和摘要必须忠实于原文内容\n- 链接必须与对应的资讯完全匹配\n\n资讯列表：\n{{ $json.articles_text }}\n\n请按照以下要求进行分析和整理：\n\n1. **精选原则**：\n   - 优先选择相关度评分≥80的资讯\n   - 重点关注技术突破、产品发布、重大投资等\n   - 避免重复或相似内容\n   - 精选3-5条最有价值的资讯\n\n2. **输出格式**（必须严格按照此JSON格式）：\n{\n  \"精选资讯\": [\n    {\n      \"标题\": \"基于原文的优化标题（不要改变核心意思）\",\n      \"来源\": \"原文中的媒体名称\",\n      \"摘要\": \"基于原文摘要的精炼版本，150字以内\",\n      \"重要性\": \"高/中/低\",\n      \"关键词\": [\"从原文提取的关键词1\", \"关键词2\"],\n      \"分类\": [\"从原文分类中选择1\", \"分类2\"],\n      \"链接\": \"原文中的实际链接（必须完整准确）\",\n      \"评分\": 85\n    }\n  ],\n  \"今日热点\": \"基于这些资讯总结的AI行业热点话题\",\n  \"行业趋势\": \"基于这些资讯分析出的行业发展趋势\",\n  \"推荐理由\": \"为什么选择这些资讯的理由\"\n}\n\n**严格要求：**\n1. 必须输出完整的JSON格式\n2. 精选资讯数量控制在3-5条\n3. 标题可以优化表达，但核心信息必须与原文一致\n4. 摘要必须基于原文内容，不得编造\n5. 关键词和分类必须从原文中提取或推导\n6. 链接必须使用原文提供的实际链接\n7. 评分要基于原文的相关度评分，可适当调整但不能偏离太多",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "id": "cf0d9a3a-eb3d-4e9e-b759-9fc4299d9441",
+      "name": "AI Analysis & Selection",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -720,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取AI分析结果\nconst analysisResult = $input.first().json;\n\nconsole.log('=== Format Feishu Card 调试信息 ===');\nconsole.log('原始分析结果:', JSON.stringify(analysisResult, null, 2));\n\n// 更安全的数据提取 - 支持多种数据格式\nlet selectedNews = [];\nlet todayHotspot = 'AI技术发展';\nlet industryTrend = 'AI技术持续创新';\nlet recommendationReason = '精选优质AI资讯';\n\n// 尝试从不同位置获取数据\nif (analysisResult.output && analysisResult.output['精选资讯']) {\n  selectedNews = analysisResult.output['精选资讯'];\n  todayHotspot = analysisResult.output['今日热点'] || todayHotspot;\n  industryTrend = analysisResult.output['行业趋势'] || industryTrend;\n  recommendationReason = analysisResult.output['推荐理由'] || recommendationReason;\n} else if (analysisResult['精选资讯']) {\n  selectedNews = analysisResult['精选资讯'];\n  todayHotspot = analysisResult['今日热点'] || todayHotspot;\n  industryTrend = analysisResult['行业趋势'] || industryTrend;\n  recommendationReason = analysisResult['推荐理由'] || recommendationReason;\n} else if (Array.isArray(analysisResult)) {\n  // 如果整个结果就是数组\n  selectedNews = analysisResult;\n} else {\n  console.log('无法找到精选资讯数据，使用空数组');\n  selectedNews = [];\n}\n\nconsole.log(`AI精选了 ${selectedNews.length} 条资讯`);\nconsole.log('今日热点:', todayHotspot);\nconsole.log('行业趋势:', industryTrend);\nconsole.log('推荐理由:', recommendationReason);\n\n// 确保 selectedNews 是数组\nif (!Array.isArray(selectedNews)) {\n  console.log('selectedNews 不是数组，转换为数组');\n  selectedNews = [];\n}\n\n// 构建飞书卡片消息\nconst currentDate = new Date().toLocaleDateString('zh-CN', {\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  weekday: 'long'\n});\n\n// 构建卡片内容\nconst cardElements = [\n  {\n    \"tag\": \"div\",\n    \"text\": {\n      \"tag\": \"lark_md\",\n      \"content\": `# 🤖 AI资讯精选 - ${currentDate}\\n\\n**今日热点**: ${todayHotspot}\\n\\n**行业趋势**: ${industryTrend}\\n\\n**推荐理由**: ${recommendationReason}\\n\\n---`\n    }\n  }\n];\n\n// 为每条精选资讯添加卡片元素\nselectedNews.forEach((news, index) => {\n  const importanceEmoji = news.重要性 === '高' ? '🔥' : news.重要性 === '中' ? '⭐' : '📰';\n  const keywordsText = Array.isArray(news.关键词) ? news.关键词.join('、') : news.关键词 || '';\n  const categoryText = Array.isArray(news.分类) ? news.分类.join('、') : news.分类 || '';\n  \n  cardElements.push({\n    \"tag\": \"div\",\n    \"text\": {\n      \"tag\": \"lark_md\",\n      \"content\": `## ${importanceEmoji} ${news.标题}\\n\\n**来源**: ${news.来源} | **评分**: ${news.评分}/100\\n\\n**摘要**: ${news.摘要}\\n\\n**关键词**: ${keywordsText}\\n\\n**分类**: ${categoryText}\\n\\n[查看原文](${news.链接})\\n\\n---`\n    }\n  });\n});\n\n// 添加统计信息\ncardElements.push({\n  \"tag\": \"div\",\n  \"text\": {\n    \"tag\": \"lark_md\",\n    \"content\": `\\n📊 **统计信息**\\n- 精选资讯: ${selectedNews.length} 条\\n- 生成时间: ${new Date().toLocaleString('zh-CN')}\\n- 数据来源: 飞书多维表格`\n  }\n});\n\n// 构建完整的卡片消息\nconst cardMessage = {\n  \"msg_type\": \"interactive\",\n  \"card\": {\n    \"config\": {\n      \"wide_screen_mode\": true\n    },\n    \"elements\": cardElements,\n    \"header\": {\n      \"title\": {\n        \"tag\": \"plain_text\",\n        \"content\": \"🤖 AI资讯精选\"\n      },\n      \"template\": \"blue\"\n    }\n  }\n};\n\nconsole.log('构建的卡片消息:', JSON.stringify(cardMessage, null, 2));\n\nreturn [{\n  json: {\n    message: cardMessage,\n    webhook_url: $('Configuration').first().json.FEISHU_WEBHOOK_URL,\n    selected_count: selectedNews.length,\n    today_hotspot: todayHotspot,\n    industry_trend: industryTrend\n  }\n}];"
+      },
+      "id": "35862686-0d43-4a4c-a685-2c094477585d",
+      "name": "Format Feishu Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.webhook_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.message }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "42793866-692f-44a2-a8a2-9488bad54fdb",
+      "name": "Send to Feishu Group",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.zhihu.com/articles",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"AI资讯精选 - {{ $json.today_hotspot }}\",\n  \"content\": \"{{ $json.zhihu_article }}\",\n  \"summary\": \"每日AI资讯精选，涵盖最新技术动态和行业趋势\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "77c6a20c-7791-40ed-b2b0-838c9f3bc61e",
+      "name": "Publish to ZHIHU",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1296,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.bilibili.com/x/article/add",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=title=AI资讯精选 - {{ $json.today_hotspot }}&content={{ $json.bilibili_article }}&category=4&tid=4",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "42519025-490f-4d56-8f89-883de293257b",
+      "name": "Publish to Bilibili",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1296,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.weibo.com/2/statuses/update.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "={{ $json.weibo_access_token }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.weibo_content }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "447489e6-66a2-468b-aa7a-70473f76dd26",
+      "name": "Publish to Weibo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1296,
+        0
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.weibo.com/oauth2/access_token",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "{{ $env.WEIBO_APP_KEY }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "{{ $env.WEIBO_APP_SECRET }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "authorization_code"
+            },
+            {
+              "name": "redirect_uri",
+              "value": "https://api.weibo.com/oauth2/default.html"
+            },
+            {
+              "name": "code",
+              "value": "{{ $env.WEIBO_AUTH_CODE }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1616,
+        496
+      ],
+      "id": "8b58c947-1aff-411c-a66f-9dad7e35059d",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取 AI Analysis 的输出\n  const inputData = $input.first().json;\n  const output = inputData.output || inputData;\n\n  // 提取文章数据\n  const actualArticles = output.精选资讯 || output.selected_articles || [];\n\n  // 微博简短版本\n  let weiboText = '#AI资讯日报# 📱\\n\\n';\n\n  const maxItems = Math.min(5, actualArticles.length);\n  for (let i = 0; i < maxItems; i++) {\n    const data = actualArticles[i];\n    const title = data.标题 || data.title || '';\n\n    const shortTitle = title.length > 30 ? title.substring(0, 27) + '...' : title;\n    weiboText += (i + 1) + '⃣ ' + shortTitle + '\\n';\n  }\n\n  weiboText += '\\n📊 详情见评论区 👇\\n';\n  weiboText += '\\n#人工智能# #AI# #科技资讯#';\n\n  // 生成详细版本\n  let weiboLongText = '📰 今日AI资讯详情\\n\\n';\n\n  for (let i = 0; i < actualArticles.length; i++) {\n    const data = actualArticles[i];\n    const title = data.标题 || data.title || '';\n    const summary = data.摘要 || data.summary || '';\n    const url = data.链接 || data.url || data.link || '';\n\n    weiboLongText += '【' + (i + 1) + '】' + title + '\\n';\n    weiboLongText += summary + '\\n';\n    weiboLongText += '🔗 ' + url + '\\n\\n';\n  }\n\n  // 生成完整的飞书消息\n  const feishuMessage = '━━━ 📱 微博发布内容 ━━━\\n\\n' +\n    '【主微博】\\n' + weiboText + '\\n\\n' +\n    '━━━━━━━━━━━━━━━━━━━━\\n\\n' +\n    '【详细版（评论/长文）】\\n' + weiboLongText + '\\n' +\n    '━━━━━━━━━━━━━━━━━━━━\\n' +\n    '💡 字数统计：' + weiboText.length + ' 字\\n' +\n    '✅ 可直接复制使用';\n\n  return [{\n    json: {\n      msg_type: 'text',\n      content: {\n        text: feishuMessage\n      }\n    }\n  }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        160
+      ],
+      "id": "44f1b608-5fb8-469b-8155-74c686dbfb74",
+      "name": "Format to Weibo"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-reasoner",
+        "options": {
+          "frequencyPenalty": 0.2,
+          "maxTokens": 8000,
+          "presencePenalty": 0.2,
+          "temperature": 0.1,
+          "maxRetries": 3,
+          "topP": 0.95
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        432
+      ],
+      "id": "b71e304f-19f7-467d-a6b9-780b011081bd",
+      "name": "DeepSeek Reasoner Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "qteDzAHbdV0P8JDG",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 新节点：Prepare Data for AI Analysis\nconst articles = $input.all();\n\nconsole.log('=== 准备AI分析数据 ===');\nconsole.log('文章数量:', articles.length);\n\n// 安全的数据提取函数\nfunction safeString(value) {\n  if (value === null || value === undefined) return '';\n  if (typeof value === 'string') return value;\n  if (typeof value === 'object') {\n    // 处理对象类型（如url对象）\n    if (value.link) return value.link;\n    if (value.text) return value.text;\n    // 处理数组类型（如keywords, category）\n    if (Array.isArray(value)) return value.join(', ');\n    // 尝试JSON序列化\n    try {\n      return JSON.stringify(value);\n    } catch (e) {\n      return String(value);\n    }\n  }\n  return String(value);\n}\n\n// 构建AI分析所需的文本格式\nconst articlesText = articles.map((article, index) => {\n  const data = article.json;\n  \n  // 安全提取各个字段\n  const title = safeString(data.title);\n  const source = safeString(data.source);\n  const score = data.relevance_score || 0;\n  const summary = safeString(data.summary);\n  const keywords = safeString(data.keywords);\n  const category = safeString(data.category);\n  const url = safeString(data.url);\n  \n  // 调试输出\n  if (index === 0) {\n    console.log('第一篇文章原始数据:', JSON.stringify(data, null, 2));\n    console.log('处理后的字段:');\n    console.log('  - title:', title);\n    console.log('  - source:', source);\n    console.log('  - summary:', summary);\n    console.log('  - keywords:', keywords);\n    console.log('  - category:', category);\n    console.log('  - url:', url);\n  }\n  \n  return `${index + 1}. 标题：${title}\n   来源：${source}\n   评分：${score}\n   摘要：${summary}\n   关键词：${keywords}\n   分类：${category}\n   链接：${url}`;\n}).join('\\n\\n');\n\nconsole.log('构建的文章文本长度:', articlesText.length);\nconsole.log('文章文本预览:', articlesText.substring(0, 800));\n\n// 返回汇总后的数据\nreturn [{\n  json: {\n    articles_text: articlesText,  // 所有文章的汇总文本\n    articles_count: articles.length,  // 文章数量\n    articles_data: articles.map(a => a.json)  // 原始文章数据数组\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        256
+      ],
+      "id": "c62349b6-5cf2-4d45-ab31-111fc04caf35",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "feishu_app_id",
+              "name": "FEISHU_APP_ID",
+              "value": "={{ $env.FEISHU_APP_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_app_secret",
+              "name": "FEISHU_APP_SECRET",
+              "value": "={{ $env.FEISHU_APP_SECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_table_id",
+              "name": "FEISHU_TABLE_ID",
+              "value": "={{ $env.FEISHU_TABLE_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_webhook_url",
+              "name": "FEISHU_WEBHOOK_URL",
+              "value": "={{ $env.FEISHU_WEBHOOK_URL }}",
+              "type": "string"
+            },
+            {
+              "id": "cb676527-0a29-4ff6-9d88-f6105bf75e55",
+              "name": "ACCESS_TOKEN",
+              "value": "=https://api.weibo.com/oauth2/access_token",
+              "type": "string"
+            },
+            {
+              "id": "b77eedb0-280e-4d5f-b839-1388f3aac28b",
+              "name": "WEIBO_APP_KEY",
+              "value": "={{ $env.WEIBO_APP_KEY }}",
+              "type": "string"
+            },
+            {
+              "id": "8f0dc13c-9181-466d-96be-84471e1372ad",
+              "name": "WEIBO_APP_SECRET",
+              "value": "={{ $env.WEIBO_APP_SECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "caf40040-20a2-4f55-80a1-c27e5d769217",
+              "name": "WEIBO_ACCESS_TOKEN",
+              "value": "={{ $env.WEIBO_ACCESS_TOKEN }}",
+              "type": "string"
+            },
+            {
+              "id": "57643eb3-ade5-4c0d-a560-71dd0724e22d",
+              "name": "WEIBO_UID",
+              "value": "={{ $env.WEIBO_UID }}",
+              "type": "string"
+            },
+            {
+              "id": "wechat_appid",
+              "name": "WECHAT_APPID",
+              "value": "={{ $env.WECHAT_APPID }}",
+              "type": "string"
+            },
+            {
+              "id": "wechat_appsecret",
+              "name": "WECHAT_APPSECRET",
+              "value": "={{ $env.WECHAT_APPSECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "6451c55f-13ef-4615-8177-0518eb7009ef",
+              "name": "FEISHU_TABLE_APP_TOKEN",
+              "value": "={{ $env.FEISHU_TABLE_APP_TOKEN}}",
+              "type": "string"
+            },
+            {
+              "id": "87e6e231-3529-48db-91a8-d76a7c52e835",
+              "name": "FEISHU_DOC_ID",
+              "value": "={{ $env.FEISHU_DOC_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "5d2ffe3e-7a61-4045-b744-5e71c18a1c12",
+              "name": "WECHAT_WHITELISTED_IPS",
+              "type": "string",
+              "value": "={{ $env.WECHAT_WHITELISTED_IPS || \"\" }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1ddf8d46-8377-42a0-8efb-74a2e59de771",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -1824,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取 AI Analysis 的输出\n  const inputData = $input.first().json;\n  const output = inputData.output || inputData;\n\n  // 提取文章数据\n  const actualArticles = output.精选资讯 || output.selected_articles || [];\n\n  // 小红书风格\n  let xhsText = '📱 今日AI圈都在聊什么？\\n\\n';\n  xhsText += '姐妹们！今天的AI资讯来啦！🔥\\n';\n  xhsText += '精选了' + actualArticles.length + '条最值得关注的消息～\\n\\n';\n  xhsText += '- - - - - - - - - -\\n\\n';\n\n  // 遍历文章\n  const sectionEmoji = ['✨', '🔥', '💡', '🎯', '⚡'];\n  const maxItems = Math.min(5, actualArticles.length);\n\n  for (let i = 0; i < maxItems; i++) {\n    const data = actualArticles[i];\n    const emoji = sectionEmoji[i] || '📌';\n    const title = data.标题 || data.title || '';\n    const summary = data.摘要 || data.summary || '';\n    const url = data.链接 || data.url || data.link || '';\n\n    xhsText += emoji + ' ' + title + '\\n\\n';\n    xhsText += summary + '\\n\\n';\n\n    // 添加关键词\n    if (data.关键词 || data.keywords) {\n      let keywords = data.关键词 || data.keywords;\n      if (Array.isArray(keywords)) {\n        keywords = keywords.slice(0, 3).join(' | ');\n      }\n      xhsText += '🏷️ ' + keywords + '\\n';\n    }\n\n    xhsText += '🔗 ' + url + '\\n\\n';\n    xhsText += '- - - - - - - - - -\\n\\n';\n  }\n\n  // 添加互动引导\n  xhsText += '💬 你最关注哪一条？评论区聊聊～\\n';\n  xhsText += '❤️ 觉得有用记得点赞、收藏、关注哦！\\n\\n';\n  xhsText += '想系统学习AI方法论？关注我，每周四更新框架实战。\\n\\n\\n';\n  xhsText += '#AI资讯 #人工智能 #科技前沿 #每日资讯 #AI工具 #AI情报站 #Build2Solve';\n\n  // 生成完整的飞书消息\n  const feishuMessage = '━━━ 🎀 小红书发布内容 ━━━\\n\\n' +\n    xhsText + '\\n\\n' +\n    '━━━━━━━━━━━━━━━━━━━━\\n' +\n    '💡 小红书建议：配图3-9张、标题控制在20字内、多用emoji\\n' +\n    '✅ 可直接复制使用';\n\n  return [{\n    json: {\n      msg_type: 'text',\n      content: {\n        text: feishuMessage\n      }\n    }\n  }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        320
+      ],
+      "id": "45e9e1d0-e6c8-4c9b-a106-a6aaa5645fd1",
+      "name": "Format to xiaohongshu"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取 AI Analysis 的输出\n  const inputData = $input.first().json;\n  const output = inputData.output || inputData;\n\n  // 提取数据\n  const actualArticles = output.精选资讯 || output.selected_articles || [];\n  const insight = output.今日热点 || output.today_highlight || '';\n  const trend = output.行业趋势 || output.industry_trend || '';\n\n  // 获取日期\n  const today = new Date().toLocaleDateString('zh-CN', {\n    year: 'numeric',\n    month: 'long',\n    day: 'numeric'\n  });\n\n  // 知乎风格\n  let zhihuText = '# AI 资讯日报 | ' + today + '\\n\\n';\n  zhihuText += '> 精选今日最值得关注的 AI 领域动态，为你节省信息筛选时间。\\n\\n';\n  zhihuText += '---\\n\\n';\n\n  // 添加今日观察\n  if (insight || trend) {\n    zhihuText += '## 📊 今日观察\\n\\n';\n    if (insight) {\n      zhihuText += '**今日热点**\\n\\n' + insight + '\\n\\n';\n    }\n    if (trend) {\n      zhihuText += '**行业趋势**\\n\\n' + trend + '\\n\\n';\n    }\n    zhihuText += '---\\n\\n';\n  }\n\n  zhihuText += '## 📰 今日精选\\n\\n';\n\n  // 遍历文章\n  for (let i = 0; i < actualArticles.length; i++) {\n    const data = actualArticles[i];\n    const title = data.标题 || data.title || '';\n    const source = data.来源 || data.source || '';\n    const score = data.评分 || data.score || data.relevance_score || 0;\n    const summary = data.摘要 || data.summary || '';\n    const url = data.链接 || data.url || data.link || '';\n\n    zhihuText += '### ' + (i + 1) + '. ' + title + '\\n\\n';\n    zhihuText += '**来源**：' + source + ' | **相关度**：' + score + '/100\\n\\n';\n    zhihuText += summary + '\\n\\n';\n\n    // 关键词\n    if (data.关键词 || data.keywords) {\n      let keywords = data.关键词 || data.keywords;\n      if (Array.isArray(keywords)) {\n        keywords = keywords.join('、');\n      }\n      zhihuText += '**关键词**：' + keywords + '\\n\\n';\n    }\n\n    zhihuText += '**原文链接**：[点击查看](' + url + ')\\n\\n';\n    zhihuText += '---\\n\\n';\n  }\n\n  // 添加尾注\n  zhihuText += '## 📌 说明\\n\\n';\n  zhihuText += '- 内容来源：多个权威 AI 媒体\\n';\n  zhihuText += '- 筛选标准：相关度评分 > 80 分\\n';\n  zhihuText += '- 更新频率：每日早晨 8:00\\n\\n';\n  zhihuText += '*本资讯由 AI 自动收集整理，如有遗漏或错误欢迎指正。*\\n';\n\n  // 生成完整的飞书消息\n  const feishuMessage = '━━━ 💡 知乎发布内容 ━━━\\n\\n' +\n    zhihuText + '\\n\\n' +\n    '━━━━━━━━━━━━━━━━━━━━\\n' +\n    '💡 知乎建议：标题突出价值、可添加配图、回答相关问题时引用\\n' +\n    '✅ 可直接复制使用';\n\n  return [{\n    json: {\n      msg_type: 'text',\n      content: {\n        text: feishuMessage\n      }\n    }\n  }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        480
+      ],
+      "id": "51169dfc-2930-42ff-8b11-bc2093e98479",
+      "name": "Format to zhihu"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.FEISHU_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        160
+      ],
+      "id": "a12c33d0-74a0-44fc-8199-fb4cf25abfee",
+      "name": "Send Weibo to feishu"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.FEISHU_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        320
+      ],
+      "id": "312a58ee-1e74-4cf4-89d0-07a91fc433d8",
+      "name": "Send xhs to feishu"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.FEISHU_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        480
+      ],
+      "id": "e3c6e48d-c2e9-4f54-86b6-2f68be66e603",
+      "name": "Send zhihu to feishu"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取 LLM 的输出\nconst input = $input.first().json;\nlet llmOutput = input.output || input.text || input;\n\nconsole.log('原始 LLM 输出类型:', typeof llmOutput);\nconsole.log('原始 LLM 输出:', llmOutput);\n\n// 如果是字符串,清理 Markdown 代码块标记\nif (typeof llmOutput === 'string') {\n  // 移除 ```json 和 ``` 标记\n  llmOutput = llmOutput\n    .replace(/```json\\s*/g, '')  // 移除 ```json\n    .replace(/```\\s*/g, '')       // 移除 ```\n    .trim();                      // 移除首尾空格\n  \n  console.log('清理后的输出:', llmOutput);\n  \n  try {\n    // 解析 JSON\n    llmOutput = JSON.parse(llmOutput);\n    console.log('JSON 解析成功');\n  } catch (e) {\n    console.error('JSON 解析失败:', e.message);\n    console.error('尝试解析的内容:', llmOutput.substring(0, 500));\n    \n    // 如果解析失败,返回错误信息\n    return [{\n      json: {\n        error: 'JSON 解析失败',\n        message: e.message,\n        raw_output: llmOutput.substring(0, 1000)\n      }\n    }];\n  }\n}\n\n// 如果已经是对象,直接使用\nconsole.log('最终输出类型:', typeof llmOutput);\n\n// 直接返回解析后的对象\nreturn [{\n  json: llmOutput\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        256
+      ],
+      "id": "7a879e1c-2ac6-4e10-9078-64d842a56e46",
+      "name": "Parse JSON output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取 AI Analysis 的输出\nconst inputData = $input.first().json;\nconst output = inputData.output || inputData;\n\n// 提取文章数据\nconst actualArticles = output.精选资讯 || output.selected_articles || [];\nconst todayHotspot = output.今日热点 || output.today_highlight || '';\nconst industryTrend = output.行业趋势 || output.industry_trend || '';\n\n// 获取日期\nconst today = new Date();\nconst dateStr = today.toLocaleDateString('zh-CN', {\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  weekday: 'long'\n});\n\nconsole.log('=== 开始生成微信公众号草稿 ===');\nconsole.log('文章数量:', actualArticles.length);\n\n// 构建 HTML 内容\nlet htmlContent = `\n<section style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 16px; color: #333; line-height: 1.8; padding: 20px;\">\n  \n  <!-- 头部 -->\n  <div style=\"text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 12px; margin-bottom: 30px;\">\n    <h1 style=\"font-size: 28px; margin: 0; font-weight: bold;\">🤖 AI资讯精选</h1>\n    <p style=\"font-size: 14px; margin: 10px 0 0 0; opacity: 0.9;\">${dateStr}</p>\n  </div>\n\n  <!-- 今日热点 -->\n  ${todayHotspot ? `\n  <section style=\"margin-bottom: 30px;\">\n    <h2 style=\"font-size: 20px; color: #1a1a1a; border-left: 4px solid #667eea; padding-left: 15px; margin-bottom: 15px; font-weight: bold;\">\n      📌 今日热点\n    </h2>\n    <div style=\"background-color: #f8f9fa; padding: 20px; border-radius: 8px; line-height: 1.8;\">\n      ${todayHotspot}\n    </div>\n  </section>\n  ` : ''}\n\n  <!-- 行业趋势 -->\n  ${industryTrend ? `\n  <section style=\"margin-bottom: 30px;\">\n    <h2 style=\"font-size: 20px; color: #1a1a1a; border-left: 4px solid #667eea; padding-left: 15px; margin-bottom: 15px; font-weight: bold;\">\n      📈 行业趋势\n    </h2>\n    <div style=\"background-color: #f8f9fa; padding: 20px; border-radius: 8px; line-height: 1.8;\">\n      ${industryTrend}\n    </div>\n  </section>\n  ` : ''}\n\n  <!-- 精选资讯 -->\n  <section>\n    <h2 style=\"font-size: 20px; color: #1a1a1a; border-left: 4px solid #667eea; padding-left: 15px; margin-bottom: 20px; font-weight: bold;\">\n      🔥 精选资讯\n    </h2>\n`;\n\n// 添加每条资讯\nactualArticles.forEach((article, index) => {\n  const title = article.标题 || article.title || '';\n  const source = article.来源 || article.source || '';\n  const summary = article.摘要 || article.summary || '';\n  const score = article.评分 || article.score || article.relevance_score || 0;\n  const url = article.链接 || article.url || article.link || '';\n  const keywords = article.关键词 || article.keywords || [];\n  \n  const keywordsStr = Array.isArray(keywords) ? keywords.slice(0, 3).join(' · ') : keywords;\n  \n  htmlContent += `\n    <article style=\"margin-bottom: 30px; padding: 20px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);\">\n      \n      <!-- 标题 -->\n      <h3 style=\"font-size: 18px; color: #1a1a1a; margin: 0 0 10px 0; font-weight: bold;\">\n        ${index + 1}. ${title}\n      </h3>\n      \n      <!-- 元信息 -->\n      <div style=\"font-size: 13px; color: #999; margin-bottom: 15px;\">\n        <span style=\"margin-right: 15px;\">📰 ${source}</span>\n        <span style=\"margin-right: 15px;\">⭐ 评分：${score}/100</span>\n      </div>\n      \n      <!-- 摘要 -->\n      <p style=\"font-size: 15px; color: #555; line-height: 1.8; margin: 15px 0;\">\n        ${summary}\n      </p>\n      \n      <!-- 关键词 -->\n      ${keywordsStr ? `\n      <div style=\"margin: 15px 0;\">\n        <span style=\"font-size: 13px; color: #667eea;\">🏷️ ${keywordsStr}</span>\n      </div>\n      ` : ''}\n      \n      <!-- 阅读原文 -->\n      <div style=\"margin-top: 15px;\">\n        <a href=\"${url}\" style=\"display: inline-block; padding: 8px 20px; background-color: #667eea; color: white; text-decoration: none; border-radius: 20px; font-size: 14px;\">\n          阅读原文 →\n        </a>\n      </div>\n      \n    </article>\n  `;\n});\n\n// 结尾\nhtmlContent += `\n  </section>\n\n  <!-- 底部 -->\n  <footer style=\"text-align: center; padding: 30px 0; margin-top: 40px; border-top: 1px solid #e0e0e0; color: #999; font-size: 14px;\">\n    <p style=\"margin: 0;\">📊 本期精选 ${actualArticles.length} 条资讯</p>\n    <p style=\"margin: 10px 0 0 0;\">💡 更多 AI 资讯敬请期待下期更新</p>\n  </footer>\n\n</section>\n`;\n\nconsole.log('HTML 内容长度:', htmlContent.length);\n\n// 返回草稿数据\nreturn [{\n  json: {\n    title: `🤖 AI资讯精选 | ${today.toLocaleDateString('zh-CN')}`,\n    author: 'AI News Bot',\n    digest: (todayHotspot || '今日AI行业最新动态精选').substring(0, 120),\n    content: htmlContent,\n    content_source_url: '',\n    need_open_comment: 0,\n    only_fans_can_comment: 0,\n    articles_count: actualArticles.length,\n    generation_time: today.toISOString(),\n    wechat_appid: $('Configuration').first().json.WECHAT_APPID,\n    wechat_appsecret: $('Configuration').first().json.WECHAT_APPSECRET\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        640
+      ],
+      "id": "dc4cd8e1-1c11-4bc2-a9c4-70de57b57503",
+      "name": "Format HTML Content for Draft",
+      "notes": "生成微信公众号图文的HTML内容"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&\nappid={{ $('Configuration').first().json.WECHAT_APPID }}&\nsecret={{ $('Configuration').first().json.WECHAT_APPSECRET }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        576
+      ],
+      "id": "8c4203c9-ef20-4ac8-abfc-138b4dfe7ddc",
+      "name": "Get WeChat Access Token"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.weixin.qq.com/cgi-bin/draft/add?access_token={{ $('Get WeChat Access Token').first().json.access_token }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"articles\": [\n    {\n      \"title\": \"{{ $('Format HTML Content for Draft').first().json.title }}\",\n      \"author\": \"{{ $('Format HTML Content for Draft').first().json.author }}\",\n      \"digest\": \"{{ $('Format HTML Content for Draft').first().json.digest }}\",\n      \"content\": {{ JSON.stringify($('Format HTML Content for Draft').first().json.content) }},\n      \"content_source_url\": \"{{ $('Format HTML Content for Draft').first().json.content_source_url }}\",\n      \"thumb_media_id\": \"{{ $env.WECHAT_COVER_MEDIA_ID }}\",\n      \"need_open_comment\": 0,\n      \"only_fans_can_comment\": 0\n    }\n  ]\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1152,
+        576
+      ],
+      "id": "d37ff165-3ef8-4ef0-a73e-974058ac302f",
+      "name": "Create WeChat Draft",
+      "notes": "创建微信公众号草稿。注意：如果需要封面图片，需要先上传图片获取thumb_media_id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取草稿创建结果\nconst draftResult = $input.first().json;\nconst formatData = $('Format HTML Content for Draft').first().json;\n\n// 检查是否创建成功\nconst isSuccess = draftResult.errcode === 0 || !draftResult.errcode;\nconst mediaId = draftResult.media_id || '未知';\nconst errorMsg = draftResult.errmsg || '';\n\n// 构建飞书消息\nlet message = '';\n\nif (isSuccess) {\n  message = `━━━ 📱 微信公众号草稿已创建 ━━━\n\n✅ 草稿已成功保存到微信公众号后台\n\n📊 基本信息：\n• 标题：${formatData.title}\n• 文章数量：${formatData.articles_count} 条资讯\n• 生成时间：${new Date(formatData.generation_time).toLocaleString('zh-CN')}\n• 草稿ID：${mediaId}\n\n🔍 下一步操作：\n1. 登录微信公众平台：https://mp.weixin.qq.com/\n2. 进入「素材管理」→「草稿箱」\n3. 找到标题为「${formatData.title}」的草稿\n4. 预览和编辑内容（可添加封面图片）\n5. 确认无误后点击「群发」或「发表」\n\n💡 提示：\n• 草稿会永久保存，可以随时修改\n• 建议先预览再发布\n• 可以在草稿中添加或更换封面图片\n• 草稿支持所有微信公众号的编辑功能\n\n━━━━━━━━━━━━━━━━━━━━\n\n🔗 快速访问：https://mp.weixin.qq.com/`;\n} else {\n  message = `━━━ ❌ 微信公众号草稿创建失败 ━━━\n\n错误信息：\n• 错误码：${draftResult.errcode}\n• 错误描述：${errorMsg}\n\n🔧 可能的原因：\n• Access Token 已过期\n• IP 不在白名单中\n• HTML 内容格式有误\n• API 调用频率超限\n\n💡 解决方案：\n1. 检查 IP 白名单配置\n2. 确认 AppID 和 AppSecret 正确\n3. 查看微信公众平台错误码文档\n\n━━━━━━━━━━━━━━━━━━━━`;\n}\n\nreturn [{\n  json: {\n    msg_type: 'text',\n    content: {\n      text: message\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        576
+      ],
+      "id": "6c565661-24d2-4022-bb54-62dd14a96485",
+      "name": "Format Draft Notification"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.FEISHU_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        576
+      ],
+      "id": "c85d7e06-e4d6-47f8-91a1-18ee6311e639",
+      "name": "Send Draft Link to Feishu"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取格式化后的数据\nconst formatData = $input.first().json;\n\n// 构建微信 API 请求体\nconst requestBody = {\n  articles: [{\n    title: formatData.title,\n    author: formatData.author,\n    digest: formatData.digest,\n    content: formatData.content,\n    content_source_url: formatData.content_source_url || '',\n    need_open_comment: formatData.need_open_comment || 0,\n    only_fans_can_comment: formatData.only_fans_can_comment || 0\n  }]\n};\n\n// 返回构建好的请求体和配置信息\nreturn [{\n  json: {\n    wechat_request_body: requestBody,\n    wechat_appid: formatData.wechat_appid,\n    wechat_appsecret: formatData.wechat_appsecret\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        640
+      ],
+      "id": "d7b5a2a4-4173-4b8c-8ef3-7ba9edc6cfd8",
+      "name": "Build WeChat Request Body"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={{ $('Configuration').first().json.WECHAT_APPID }}&secret={{ $('Configuration').first().json.WECHAT_APPSECRET }}",
+        "options": {}
+      },
+      "id": "2d48d7a4-1b82-4f40-a479-1a1ed03dd0b0",
+      "name": "Check Public IP",
+      "position": [
+        432,
+        640
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json || {};\nconst errcode = Number(response.errcode || 0);\nconst errmsg = response.errmsg || '';\nlet ip = response.ip || '';\nconst match = errmsg.match(/invalid ip ([0-9.]+)/i) || errmsg.match(/ip ([0-9.]+) not in whitelist/i);\nif (match) {\n  ip = match[1];\n}\nconst allowlistRaw = ($('Configuration').first().json.WECHAT_WHITELISTED_IPS || '').toString();\nconst allowlist = allowlistRaw.split(',').map(entry => entry.trim()).filter(Boolean);\nconst hasWildcard = allowlist.some(entry => ['*', 'any', 'ANY'].includes(entry.toLowerCase()));\nconst allowlistConfigured = allowlist.length > 0 || hasWildcard;\nlet isWhitelisted = false;\nlet reason = '';\nif (errcode === 0 || response.access_token) {\n  isWhitelisted = true;\n} else if (!allowlistConfigured) {\n  reason = '尚未配置白名单，默认阻止微信 API 调用';\n} else if (!ip) {\n  reason = errmsg || '无法从微信响应中解析出口 IP';\n} else if (hasWildcard || allowlist.includes(ip)) {\n  isWhitelisted = true;\n} else {\n  reason = `微信检测到的出口 IP ${ip} 不在白名单中`;\n}\nif (!reason && errmsg && errcode !== 0 && !isWhitelisted) {\n  reason = errmsg;\n}\nreturn [{\n  ip,\n  allowlist,\n  allowlistConfigured,\n  hasWildcard,\n  isWhitelisted,\n  reason,\n  errcode,\n  errmsg,\n  docPath: 'C:\\\\\\\\Users\\\\\\\\SSS\\\\\\\\Documents\\\\\\\\AI News workflow\\\\\\\\VPN环境下的微信白名单解决方案.md'\n}];"
+      },
+      "id": "861594c4-7a2d-4b3b-8c1f-6ee1a1e56cec",
+      "name": "Validate WeChat Whitelist",
+      "position": [
+        608,
+        640
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "aef8fcf4-f778-45ba-9207-edf35e83d886",
+              "leftValue": "={{ $json.ip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cea8841f-a192-46f7-8db6-adbd229b5a75",
+      "name": "IP Whitelisted?",
+      "position": [
+        784,
+        640
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const ip = $json.ip || '未知 IP';\nconst allowlist = ($json.allowlist || []).join(', ') || '未配置';\nconst reason = $json.reason || 'IP 不在白名单';\nconst docPath = $json.docPath || 'C://Users//SSS//Documents//AI News workflow//VPN环境下的微信白名单解决方案.md';\nconst timestamp = new Date().toLocaleString('zh-CN', { hour12: false });\nconst text = `⚠️ Workflow B 跳过了微信草稿创建。\n当前出口 IP：${ip}\n原因：${reason}\n白名单：${allowlist}\n请参考 ${docPath} 更新微信白名单或使用文档中的云服务器/分流方案。\n时间：${timestamp}`;\nreturn [{\n  msg_type: 'text',\n  content: { text },\n  ip,\n  reason\n}];"
+      },
+      "id": "eba899dd-47d6-4bd2-9842-e731d8525893",
+      "name": "Build IP Alert Message",
+      "position": [
+        992,
+        832
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.FEISHU_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "47feb16a-f214-459f-95e9-c33595f23b70",
+      "name": "Send IP Alert to Feishu",
+      "position": [
+        1200,
+        832
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Feishu Token": {
+      "main": [
+        [
+          {
+            "node": "Read Feishu Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Feishu Table": {
+      "main": [
+        [
+          {
+            "node": "Filter Recent Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Recent Articles": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Analysis & Selection": {
+      "main": [
+        [
+          {
+            "node": "Parse JSON output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Feishu Card": {
+      "main": [
+        [
+          {
+            "node": "Send to Feishu Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Reasoner Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Analysis & Selection",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Analysis & Selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Get Feishu Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format to Weibo": {
+      "main": [
+        [
+          {
+            "node": "Send Weibo to feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format to xiaohongshu": {
+      "main": [
+        [
+          {
+            "node": "Send xhs to feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format to zhihu": {
+      "main": [
+        [
+          {
+            "node": "Send zhihu to feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse JSON output": {
+      "main": [
+        [
+          {
+            "node": "Format Feishu Card",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format to Weibo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format to xiaohongshu",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format to zhihu",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format HTML Content for Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format HTML Content for Draft": {
+      "main": [
+        [
+          {
+            "node": "Build WeChat Request Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get WeChat Access Token": {
+      "main": [
+        [
+          {
+            "node": "Create WeChat Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create WeChat Draft": {
+      "main": [
+        [
+          {
+            "node": "Format Draft Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Draft Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Draft Link to Feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build WeChat Request Body": {
+      "main": [
+        [
+          {
+            "node": "Check Public IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Public IP": {
+      "main": [
+        [
+          {
+            "node": "Validate WeChat Whitelist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate WeChat Whitelist": {
+      "main": [
+        [
+          {
+            "node": "IP Whitelisted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IP Whitelisted?": {
+      "main": [
+        [
+          {
+            "node": "Get WeChat Access Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build IP Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build IP Alert Message": {
+      "main": [
+        [
+          {
+            "node": "Send IP Alert to Feishu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "26645e3e-8332-46fe-a520-dd45d55ffde7",
+  "meta": {
+    "instanceId": "d6e264425c95309c6cb7a1b5b39423ac57593612895e6024faca12cbaca2335b"
+  },
+  "id": "FS4EcfbBFKSIDNO9",
+  "tags": []
+}

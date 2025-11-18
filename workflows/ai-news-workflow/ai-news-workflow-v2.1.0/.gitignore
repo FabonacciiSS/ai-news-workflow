@@ -1,0 +1,40 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# n8n runtime data
+.n8n/
+n8n.sqlite*
+
+# Logs
+logs/
+*.log
+
+# Node tooling
+node_modules/
+.npm/
+.yarn/
+.pnpm-debug.log*
+
+# Cache / coverage
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Temp / backups
+tmp/
+temp/
+*.bak
+*.backup
+
+# Docker
+.dockerignore

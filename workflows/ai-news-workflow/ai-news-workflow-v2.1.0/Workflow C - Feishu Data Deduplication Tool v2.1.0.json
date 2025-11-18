@@ -1,0 +1,451 @@
+{
+  "name": "Workflow C - Feishu Data Deduplication Tool v2.1.0",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "705d86f8-a6d0-4df5-ad49-43bc67efdb17",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2816,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 23 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "e3ed9f93-930b-4dda-b295-37f7445afc05",
+      "name": "Schedule Trigger (Weekly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2816,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "feishu_app_id",
+              "name": "FEISHU_APP_ID",
+              "value": "={{ $env.FEISHU_APP_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_app_secret",
+              "name": "FEISHU_APP_SECRET",
+              "value": "={{ $env.FEISHU_APP_SECRET }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_table_app_token",
+              "name": "FEISHU_TABLE_APP_TOKEN",
+              "value": "={{ $env.FEISHU_TABLE_APP_TOKEN }}",
+              "type": "string"
+            },
+            {
+              "id": "feishu_table_id",
+              "name": "FEISHU_TABLE_ID",
+              "value": "={{ $env.FEISHU_TABLE_ID }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "027e2f71-72e3-4f41-becc-46b146bd69d2",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        -2608,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $json.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $json.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "id": "1a354f70-06f2-4dd8-8172-1ed64d3cdaef",
+      "name": "Get Feishu Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2416,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $('Configuration').first().json.FEISHU_TABLE_APP_TOKEN }}/tables/{{ $('Configuration').first().json.FEISHU_TABLE_ID }}/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Feishu Token').first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"view_id\": \"vewVV5mpaw\",\n  \"page_size\": 500\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "685cc3e6-8a68-4974-bdb7-64ec8e8a4c0c",
+      "name": "Read All Records",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2208,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// Workflow C v1.2 - 飞书去重分析工具\n// 新增：定时自动执行（每周日23:00）\n// ========================================\n\nconst tableData = $input.first().json;\nconst records = tableData.data?.items || [];\n\nconsole.log(`\\n========================================`);\nconsole.log(`📊 飞书多维表格去重分析报告 v1.2`);\nconsole.log(`========================================`);\nconsole.log(`执行时间: ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`);\nconsole.log(`总记录数: ${records.length}`);\n\nif (records.length === 0) {\n  console.warn('⚠️ 未读取到任何记录');\n  return [];\n}\n\n// 安全提取飞书字段的函数\nfunction extractFeishuField(field, defaultValue = '') {\n  if (!field) return defaultValue;\n  if (typeof field === 'string') return field;\n  \n  if (Array.isArray(field)) {\n    if (field.length === 0) return defaultValue;\n    if (field[0] && typeof field[0] === 'object' && field[0].text) {\n      return field.map(item => item.text).join(', ');\n    }\n    return field.join(', ');\n  }\n  \n  if (typeof field === 'object') {\n    if (field.text) return field.text;\n    if (field.link) return field.link;\n  }\n  \n  return String(field);\n}\n\nfunction extractUrl(urlField) {\n  if (!urlField) return '';\n  if (typeof urlField === 'string') return urlField;\n  if (typeof urlField === 'object' && urlField.link) return urlField.link;\n  if (Array.isArray(urlField) && urlField[0]?.link) return urlField[0].link;\n  return '';\n}\n\n// 🆕 URL标准化（与Workflow A v2.1保持一致）\nfunction normalizeUrl(url) {\n  if (!url) return '';\n  try {\n    let normalized = url.toLowerCase().trim();\n    normalized = normalized.replace(/^(https?:\\/\\/)?(www\\.)?/, '');\n    normalized = normalized.replace(/\\/$/, '');\n    return normalized;\n  } catch (e) {\n    return url.toLowerCase().trim();\n  }\n}\n\n// 标准化标题\nfunction normalizeTitle(title) {\n  if (!title) return '';\n  return title\n    .toLowerCase()\n    .trim()\n    .replace(/\\s+/g, ' ')\n    .replace(/[.,;:!?'\"()（）【】「」\\[\\]]/g, '');\n}\n\n// 建立索引，识别重复记录\nconst urlIndex = new Map();\nconst titleIndex = new Map();\nconst normalizedUrlIndex = new Map();\nconst normalizedTitleIndex = new Map();\n\nconst duplicateGroups = [];\nconst uniqueRecords = [];\nconst recordsToDelete = [];\n\n// 第一轮：按URL和标题分组\nrecords.forEach((record, index) => {\n  const fields = record.fields;\n  const url = extractUrl(fields.url);\n  const title = extractFeishuField(fields.title, '');\n  const source = extractFeishuField(fields.source, '');\n  const pubDate = fields.publish_date;\n  \n  const recordInfo = {\n    record_id: record.record_id,\n    index: index,\n    url: url,\n    title: title,\n    source: source,\n    pubDate: pubDate,\n    normalizedUrl: normalizeUrl(url),\n    normalizedTitle: normalizeTitle(title)\n  };\n  \n  // URL精确匹配\n  if (url) {\n    const urlKey = url.toLowerCase().trim();\n    if (!urlIndex.has(urlKey)) {\n      urlIndex.set(urlKey, []);\n    }\n    urlIndex.get(urlKey).push(recordInfo);\n  }\n  \n  // 🆕 URL标准化匹配\n  if (recordInfo.normalizedUrl) {\n    if (!normalizedUrlIndex.has(recordInfo.normalizedUrl)) {\n      normalizedUrlIndex.set(recordInfo.normalizedUrl, []);\n    }\n    normalizedUrlIndex.get(recordInfo.normalizedUrl).push(recordInfo);\n  }\n  \n  // 标题精确匹配\n  if (title) {\n    const titleKey = title.toLowerCase().trim();\n    if (!titleIndex.has(titleKey)) {\n      titleIndex.set(titleKey, []);\n    }\n    titleIndex.get(titleKey).push(recordInfo);\n  }\n  \n  // 🆕 标题标准化匹配\n  if (recordInfo.normalizedTitle) {\n    if (!normalizedTitleIndex.has(recordInfo.normalizedTitle)) {\n      normalizedTitleIndex.set(recordInfo.normalizedTitle, []);\n    }\n    normalizedTitleIndex.get(recordInfo.normalizedTitle).push(recordInfo);\n  }\n});\n\n// 统计重复情况\nlet urlExactDuplicates = 0;\nlet urlNormalizedDuplicates = 0;\nlet titleExactDuplicates = 0;\nlet titleNormalizedDuplicates = 0;\n\nconst processedRecordIds = new Set();\n\n// 处理URL精确重复\nurlIndex.forEach((group, url) => {\n  if (group.length > 1) {\n    urlExactDuplicates += group.length - 1;\n    \n    // 按日期排序，保留最新的\n    group.sort((a, b) => {\n      const dateA = a.pubDate || 0;\n      const dateB = b.pubDate || 0;\n      return dateB - dateA;\n    });\n    \n    duplicateGroups.push({\n      type: 'URL精确重复',\n      key: url,\n      count: group.length,\n      records: group,\n      keepRecord: group[0],\n      deleteRecords: group.slice(1)\n    });\n    \n    // 标记要保留和删除的记录\n    processedRecordIds.add(group[0].record_id);\n    group.slice(1).forEach(r => {\n      processedRecordIds.add(r.record_id);\n      recordsToDelete.push({\n        record_id: r.record_id,\n        reason: 'URL精确重复',\n        duplicate_of: group[0].record_id,\n        title: r.title,\n        url: r.url\n      });\n    });\n  }\n});\n\n// 🆕 处理URL标准化重复（排除已处理的精确重复）\nnormalizedUrlIndex.forEach((group, normalizedUrl) => {\n  if (group.length > 1) {\n    const unprocessed = group.filter(r => !processedRecordIds.has(r.record_id));\n    if (unprocessed.length > 1) {\n      urlNormalizedDuplicates += unprocessed.length - 1;\n      \n      unprocessed.sort((a, b) => {\n        const dateA = a.pubDate || 0;\n        const dateB = b.pubDate || 0;\n        return dateB - dateA;\n      });\n      \n      duplicateGroups.push({\n        type: 'URL标准化重复',\n        key: normalizedUrl,\n        count: unprocessed.length,\n        records: unprocessed,\n        keepRecord: unprocessed[0],\n        deleteRecords: unprocessed.slice(1)\n      });\n      \n      processedRecordIds.add(unprocessed[0].record_id);\n      unprocessed.slice(1).forEach(r => {\n        processedRecordIds.add(r.record_id);\n        recordsToDelete.push({\n          record_id: r.record_id,\n          reason: 'URL标准化重复(http/https差异)',\n          duplicate_of: unprocessed[0].record_id,\n          title: r.title,\n          url: r.url\n        });\n      });\n    }\n  }\n});\n\n// 处理标题精确重复（排除已处理的URL重复）\ntitleIndex.forEach((group, title) => {\n  if (group.length > 1) {\n    const unprocessed = group.filter(r => !processedRecordIds.has(r.record_id));\n    if (unprocessed.length > 1) {\n      titleExactDuplicates += unprocessed.length - 1;\n      \n      unprocessed.sort((a, b) => {\n        const dateA = a.pubDate || 0;\n        const dateB = b.pubDate || 0;\n        return dateB - dateA;\n      });\n      \n      duplicateGroups.push({\n        type: '标题精确重复',\n        key: title,\n        count: unprocessed.length,\n        records: unprocessed,\n        keepRecord: unprocessed[0],\n        deleteRecords: unprocessed.slice(1)\n      });\n      \n      processedRecordIds.add(unprocessed[0].record_id);\n      unprocessed.slice(1).forEach(r => {\n        processedRecordIds.add(r.record_id);\n        recordsToDelete.push({\n          record_id: r.record_id,\n          reason: '标题精确重复',\n          duplicate_of: unprocessed[0].record_id,\n          title: r.title,\n          url: r.url\n        });\n      });\n    }\n  }\n});\n\n// 🆕 处理标题标准化重复（排除已处理的）\nnormalizedTitleIndex.forEach((group, normalizedTitle) => {\n  if (group.length > 1) {\n    const unprocessed = group.filter(r => !processedRecordIds.has(r.record_id));\n    if (unprocessed.length > 1) {\n      titleNormalizedDuplicates += unprocessed.length - 1;\n      \n      unprocessed.sort((a, b) => {\n        const dateA = a.pubDate || 0;\n        const dateB = b.pubDate || 0;\n        return dateB - dateA;\n      });\n      \n      duplicateGroups.push({\n        type: '标题标准化重复',\n        key: normalizedTitle,\n        count: unprocessed.length,\n        records: unprocessed,\n        keepRecord: unprocessed[0],\n        deleteRecords: unprocessed.slice(1)\n      });\n      \n      processedRecordIds.add(unprocessed[0].record_id);\n      unprocessed.slice(1).forEach(r => {\n        processedRecordIds.add(r.record_id);\n        recordsToDelete.push({\n          record_id: r.record_id,\n          reason: '标题标准化重复(标点差异)',\n          duplicate_of: unprocessed[0].record_id,\n          title: r.title,\n          url: r.url\n        });\n      });\n    }\n  }\n});\n\n// 生成报告\nconsole.log(`\\n📋 重复统计（增强版）：`);\nconsole.log(`- URL精确重复: ${urlExactDuplicates} 条`);\nconsole.log(`- URL标准化重复: ${urlNormalizedDuplicates} 条 🆕`);\nconsole.log(`- 标题精确重复: ${titleExactDuplicates} 条`);\nconsole.log(`- 标题标准化重复: ${titleNormalizedDuplicates} 条 🆕`);\nconsole.log(`- 总计待删除: ${recordsToDelete.length} 条`);\nconsole.log(`- 去重后剩余: ${records.length - recordsToDelete.length} 条`);\nconsole.log(`- 去重率: ${((recordsToDelete.length / records.length) * 100).toFixed(1)}%`);\n\nconsole.log(`\\n🔍 重复组详情（前10组）：`);\nduplicateGroups.slice(0, 10).forEach((group, i) => {\n  console.log(`\\n${i + 1}. ${group.type} - ${group.count}条记录`);\n  console.log(`   关键字: ${group.key.substring(0, 50)}...`);\n  console.log(`   保留: ${group.keepRecord.title.substring(0, 40)}...`);\n  console.log(`   删除: ${group.deleteRecords.length}条`);\n});\n\nif (duplicateGroups.length > 10) {\n  console.log(`\\n... 还有 ${duplicateGroups.length - 10} 组重复记录`);\n}\n\nconsole.log(`\\n========================================`);\n\n// 返回待删除的记录ID列表\nreturn [{\n  json: {\n    version: 'v1.2',\n    execution_time: new Date().toISOString(),\n    total_records: records.length,\n    duplicate_count: recordsToDelete.length,\n    unique_count: records.length - recordsToDelete.length,\n    records_to_delete: recordsToDelete,\n    duplicate_groups: duplicateGroups,\n    summary: {\n      url_exact_duplicates: urlExactDuplicates,\n      url_normalized_duplicates: urlNormalizedDuplicates,\n      title_exact_duplicates: titleExactDuplicates,\n      title_normalized_duplicates: titleNormalizedDuplicates,\n      total_to_delete: recordsToDelete.length,\n      deduplication_rate: ((recordsToDelete.length / records.length) * 100).toFixed(1) + '%'\n    }\n  }\n}];"
+      },
+      "id": "66315606-fc41-41ed-bbdd-e4f0e6cc7e9e",
+      "name": "Analyze Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2016,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 显示分析结果，让用户确认\nconst analysis = $input.first().json;\n\nconst message = `\n╔════════════════════════════════════════════════╗\n║  飞书多维表格去重分析结果 v1.2 (增强版)        ║\n╚════════════════════════════════════════════════╝\n\n⏰ 执行时间：${new Date(analysis.execution_time).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}\n\n📊 统计信息：\n   • 总记录数: ${analysis.total_records}\n   • 发现重复: ${analysis.duplicate_count} 条\n   • 去重后: ${analysis.unique_count} 条\n   • 去重率: ${analysis.summary.deduplication_rate}\n\n📋 重复类型（增强版）：\n   • URL精确重复: ${analysis.summary.url_exact_duplicates} 条\n   • URL标准化重复: ${analysis.summary.url_normalized_duplicates} 条 🆕\n   • 标题精确重复: ${analysis.summary.title_exact_duplicates} 条\n   • 标题标准化重复: ${analysis.summary.title_normalized_duplicates} 条 🆕\n\n⚠️  注意：\n   接下来的节点将执行删除操作！\n   删除前请仔细检查分析结果。\n\n💡 v1.2 新功能：\n   ✅ 定时自动执行（每周日23:00）\n   ✅ URL标准化去重（识别http/https差异）\n   ✅ 标题标准化去重（识别标点差异）\n   ✅ 增强统计报告\n\n════════════════════════════════════════════════\n`;\n\nconsole.log(message);\n\nreturn [$input.first()];"
+      },
+      "id": "2166df1f-8d8c-420e-82f2-edc9f479e357",
+      "name": "Display Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1808,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.duplicate_count }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gte"
+                    },
+                    "id": "0e7d0993-e001-4d88-b791-90800c5419a3"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "8a5992c5-8236-4d40-a77f-0ac9c013940d",
+                    "leftValue": "={{ $json.duplicate_count }}",
+                    "rightValue": 0,
+                    "operator": {
+                      "operation": "equals",
+                      "type": "number"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1c616e5-f2ad-4141-b69d-fcdbe4bb08ef",
+      "name": "Has Duplicates?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -1616,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 分批处理删除请求（避免API限制）\nconst analysis = $input.first().json;\nconst recordsToDelete = analysis.records_to_delete || [];\n\nif (recordsToDelete.length === 0) {\n  console.log('没有需要删除的记录');\n  return [];\n}\n\nconsole.log(`准备删除 ${recordsToDelete.length} 条重复记录`);\n\n// 每批删除10条（避免触发API频率限制）\nconst batchSize = 10;\nconst batches = [];\n\nfor (let i = 0; i < recordsToDelete.length; i += batchSize) {\n  const batch = recordsToDelete.slice(i, i + batchSize);\n  batches.push({\n    batch_number: Math.floor(i / batchSize) + 1,\n    total_batches: Math.ceil(recordsToDelete.length / batchSize),\n    record_ids: batch.map(r => r.record_id),\n    records: batch\n  });\n}\n\nconsole.log(`分为 ${batches.length} 批次处理`);\n\nreturn batches;"
+      },
+      "id": "b7af26a3-f5da-408a-b465-34ca314b303d",
+      "name": "Prepare Delete Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $('Configuration').first().json.FEISHU_TABLE_APP_TOKEN }}/tables/{{ $('Configuration').first().json.FEISHU_TABLE_ID }}/records/batch_delete",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Feishu Token').first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"records\": {{ JSON.stringify($json.record_ids) }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "242bbf6a-c664-4f40-aa1c-f4f3009ac6a5",
+      "name": "Delete Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "id": "dfb93ed6-5d61-45bc-b22f-1844b1c13e31",
+      "name": "Wait Between Batches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1008,
+        0
+      ],
+      "webhookId": "cac641ff-29b7-4fd5-b650-4e5ac395113b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 汇总删除结果\nconst allResults = $input.all();\n\nlet successCount = 0;\nlet failCount = 0;\n\nallResults.forEach(result => {\n  if (result.json?.code === 0 || result.json?.data) {\n    successCount += result.json.batch_size || 1;\n  } else {\n    failCount++;\n  }\n});\n\nconst summary = `\n╔════════════════════════════════════════════════╗\n║       删除操作完成 (Workflow C v1.2)           ║\n╚════════════════════════════════════════════════╝\n\n✅ 成功删除: ${successCount} 条记录\n❌ 失败: ${failCount} 批次\n📊 处理批次: ${allResults.length} 批\n⏰ 完成时间: ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}\n\n🎉 数据库已优化，重复记录已清理！\n\n════════════════════════════════════════════════\n`;\n\nconsole.log(summary);\n\nreturn [{\n  json: {\n    success_count: successCount,\n    fail_count: failCount,\n    total_batches: allResults.length,\n    completion_time: new Date().toISOString(),\n    message: '去重操作完成'\n  }\n}];"
+      },
+      "id": "8f53e672-62f6-4c43-a340-b57c70ca2664",
+      "name": "Summarize Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log('\\n✅ 没有发现重复记录，无需删除操作');\nconsole.log(`执行时间: ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`);\n\nreturn [{\n  json: {\n    message: '没有重复记录',\n    action: 'skipped',\n    execution_time: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "c4d582f3-7f24-4c58-9bbe-b49e9e0d6327",
+      "name": "No Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger (Weekly)": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Get Feishu Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Feishu Token": {
+      "main": [
+        [
+          {
+            "node": "Read All Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Records": {
+      "main": [
+        [
+          {
+            "node": "Analyze Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Display Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Display Results": {
+      "main": [
+        [
+          {
+            "node": "Has Duplicates?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Delete Batches": {
+      "main": [
+        [
+          {
+            "node": "Delete Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Batch": {
+      "main": [
+        [
+          {
+            "node": "Wait Between Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Between Batches": {
+      "main": [
+        [
+          {
+            "node": "Summarize Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Duplicates?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Delete Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7c8df516-65bb-44d8-b8a8-6b8f496b0953",
+  "meta": {
+    "instanceId": "d6e264425c95309c6cb7a1b5b39423ac57593612895e6024faca12cbaca2335b"
+  },
+  "id": "qzDVkSvez4z24dSI",
+  "tags": []
+}
